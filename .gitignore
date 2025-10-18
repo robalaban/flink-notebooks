@@ -14,7 +14,7 @@ build/
 TODO.md
 .direnv
 .claude
-
+CLAUDE.md
 
 # Node.js
 node_modules/
