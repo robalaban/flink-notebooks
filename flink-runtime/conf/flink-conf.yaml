@@ -1,0 +1,80 @@
+# Flink MiniCluster Configuration
+# Minimal configuration for local development
+
+################################################################################
+# Common
+################################################################################
+
+# Execution target - use remote to connect to the running MiniCluster
+execution.target: remote
+jobmanager.rpc.address: localhost
+jobmanager.rpc.port: 6123
+
+# The default parallelism for operations
+parallelism.default: 2
+
+################################################################################
+# JobManager
+################################################################################
+
+jobmanager.memory.process.size: 512m
+jobmanager.execution.failover-strategy: region
+
+################################################################################
+# TaskManager
+################################################################################
+
+taskmanager.memory.process.size: 512m
+taskmanager.numberOfTaskSlots: 2
+
+################################################################################
+# Rest & Web Frontend
+################################################################################
+
+rest.port: 8081
+rest.address: localhost
+
+################################################################################
+# SQL Gateway
+################################################################################
+
+sql-gateway.endpoint.rest.port: 8083
+sql-gateway.endpoint.rest.address: 0.0.0.0
+
+# SQL Gateway worker thread pool configuration
+sql-gateway.worker.threads.min: 5
+sql-gateway.worker.threads.max: 20
+sql-gateway.worker.keepalive-time: 300000
+
+################################################################################
+# State Backends
+################################################################################
+
+# The backend that will be used to store operator state checkpoints
+state.backend: hashmap
+
+################################################################################
+# Checkpointing and State
+################################################################################
+
+# The default interval for checkpoints (disabled by default)
+execution.checkpointing.interval: 10s
+execution.checkpointing.mode: EXACTLY_ONCE
+execution.checkpointing.timeout: 10min
+
+################################################################################
+# Networking
+################################################################################
+
+# The default network port to connect to for communication
+taskmanager.network.memory.fraction: 0.1
+taskmanager.network.memory.min: 64mb
+taskmanager.network.memory.max: 64mb
+
+################################################################################
+# Security
+################################################################################
+
+# Disable delegation tokens for local development
+# This fixes Java 17+ compatibility issues with Hadoop security
+security.delegation.tokens.enabled: false

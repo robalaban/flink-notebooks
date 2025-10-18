@@ -1,0 +1,103 @@
+plugins {
+    id 'java'
+    id 'application'
+    id 'com.github.johnrengelman.shadow' version '8.1.1'
+}
+
+group = 'com.flink.notebooks'
+version = '1.0.0'
+
+java {
+    sourceCompatibility = JavaVersion.VERSION_17
+    targetCompatibility = JavaVersion.VERSION_17
+}
+
+repositories {
+    mavenCentral()
+}
+
+ext {
+    flinkVersion = '1.20.0'
+    icebergVersion = '1.7.1'
+    awsSdkVersion = '2.30.16'
+    hadoopVersion = '3.4.1'
+    postgresVersion = '42.7.5'
+    flinkJdbcConnectorVersion = '3.2.0-1.19'
+    flinkPostgresCdcVersion = '3.3.0'
+}
+
+dependencies {
+    // Flink Core
+    implementation "org.apache.flink:flink-runtime:${flinkVersion}"
+    implementation "org.apache.flink:flink-clients:${flinkVersion}"
+    implementation "org.apache.flink:flink-runtime-web:${flinkVersion}"
+
+    // Flink Table & SQL (Java API only - no Scala)
+    implementation "org.apache.flink:flink-table-api-java-bridge:${flinkVersion}"
+    implementation "org.apache.flink:flink-table-planner-loader:${flinkVersion}"
+    implementation "org.apache.flink:flink-table-runtime:${flinkVersion}"
+
+    // SQL Gateway
+    implementation "org.apache.flink:flink-sql-gateway:${flinkVersion}"
+
+    // JSON format support (required by SQL Gateway's ResultInfoSerializer)
+    implementation "org.apache.flink:flink-json:${flinkVersion}"
+
+    // Connector Base (required by many connectors)
+    implementation "org.apache.flink:flink-connector-base:${flinkVersion}"
+    implementation "org.apache.flink:flink-connector-files:${flinkVersion}"
+
+    // Apache Iceberg
+    implementation "org.apache.iceberg:iceberg-flink-runtime-1.20:${icebergVersion}"
+
+    // AWS SDK
+    implementation "software.amazon.awssdk:bundle:${awsSdkVersion}"
+
+    // S3 Filesystem
+    implementation "org.apache.flink:flink-s3-fs-presto:${flinkVersion}"
+
+    // Hadoop Dependencies
+    implementation "org.apache.hadoop:hadoop-common:${hadoopVersion}"
+    implementation "org.apache.hadoop:hadoop-client:${hadoopVersion}"
+    implementation "org.apache.hadoop:hadoop-client-api:${hadoopVersion}"
+    implementation "org.apache.hadoop:hadoop-client-runtime:${hadoopVersion}"
+
+    // Database Connectors
+    implementation "org.postgresql:postgresql:${postgresVersion}"
+    implementation "org.apache.flink:flink-connector-jdbc:${flinkJdbcConnectorVersion}"
+    implementation "org.apache.flink:flink-sql-connector-postgres-cdc:${flinkPostgresCdcVersion}"
+
+    // Logging
+    implementation 'org.slf4j:slf4j-api:2.0.9'
+    implementation 'org.slf4j:slf4j-simple:2.0.9'
+}
+
+application {
+    mainClass = 'com.flink.notebooks.MiniClusterRunner'
+}
+
+shadowJar {
+    archiveBaseName = 'flink-minicluster'
+    archiveClassifier = ''
+    archiveVersion = ''
+
+    // Enable zip64 for large archives (>65535 entries)
+    zip64 = true
+
+    manifest {
+        attributes 'Main-Class': 'com.flink.notebooks.MiniClusterRunner'
+    }
+
+    // Exclude signature files
+    exclude 'META-INF/*.SF'
+    exclude 'META-INF/*.DSA'
+    exclude 'META-INF/*.RSA'
+
+    // Exclude problematic DNS resolver service that references dnsjava
+    // (the provider class is not in the JAR, causing ServiceLoader errors)
+    exclude 'META-INF/services/java.net.spi.InetAddressResolverProvider'
+
+    mergeServiceFiles()
+}
+
+tasks.build.dependsOn shadowJar

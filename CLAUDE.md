@@ -1,0 +1,3 @@
+- use standards
+- take your time, there is no rush
+- use clean code

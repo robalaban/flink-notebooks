@@ -1,0 +1,260 @@
+{
+  "name": "flink-notebooks",
+  "displayName": "Flink Notebooks",
+  "description": "Jupyter-like notebooks for Apache Flink SQL",
+  "version": "0.1.0",
+  "publisher": "flink-notebooks",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Notebooks",
+    "Data Science"
+  ],
+  "keywords": [
+    "flink",
+    "sql",
+    "notebooks",
+    "streaming",
+    "data"
+  ],
+  "activationEvents": [
+    "onNotebook:flink-notebook"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "notebooks": [
+      {
+        "type": "flink-notebook",
+        "displayName": "Flink Notebook",
+        "selector": [
+          {
+            "filenamePattern": "*.flinknb"
+          }
+        ]
+      }
+    ],
+    "commands": [
+      {
+        "command": "flink-notebooks.newNotebook",
+        "title": "Flink: New Flink Notebook",
+        "category": "Flink"
+      },
+      {
+        "command": "flink-notebooks.startCluster",
+        "title": "Flink: Start Local Cluster",
+        "category": "Flink"
+      },
+      {
+        "command": "flink-notebooks.stopCluster",
+        "title": "Flink: Stop Local Cluster",
+        "category": "Flink"
+      },
+      {
+        "command": "flink-notebooks.refreshCatalog",
+        "title": "Flink: Refresh Catalog",
+        "category": "Flink",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "flink-notebooks.insertTable",
+        "title": "Insert Table Reference",
+        "icon": "$(insert)"
+      },
+      {
+        "command": "flink-notebooks.refreshJobs",
+        "title": "Flink: Refresh Jobs",
+        "category": "Flink",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "flink-notebooks.openFlinkWebUI",
+        "title": "Flink: Open Web UI",
+        "category": "Flink",
+        "icon": "$(globe)"
+      },
+      {
+        "command": "flink-notebooks.openJobInWebUI",
+        "title": "Open in Web UI"
+      },
+      {
+        "command": "flink-notebooks.viewJobDetails",
+        "title": "View Job Details"
+      },
+      {
+        "command": "flink-notebooks.viewJobMetrics",
+        "title": "View Job Metrics"
+      },
+      {
+        "command": "flink-notebooks.cancelJob",
+        "title": "Cancel Job",
+        "icon": "$(debug-stop)"
+      },
+      {
+        "command": "flink-notebooks.stopStreaming",
+        "title": "Stop Streaming",
+        "icon": "$(debug-stop)"
+      }
+    ],
+    "views": {
+      "explorer": [
+        {
+          "id": "flinkCatalog",
+          "name": "Flink Catalog",
+          "when": "flink-notebooks:catalogAvailable"
+        },
+        {
+          "id": "flinkJobs",
+          "name": "Flink Jobs",
+          "when": "flink-notebooks:clusterRunning"
+        }
+      ]
+    },
+    "menus": {
+      "view/title": [
+        {
+          "command": "flink-notebooks.refreshCatalog",
+          "when": "view == flinkCatalog",
+          "group": "navigation"
+        },
+        {
+          "command": "flink-notebooks.refreshJobs",
+          "when": "view == flinkJobs",
+          "group": "navigation@1"
+        },
+        {
+          "command": "flink-notebooks.openFlinkWebUI",
+          "when": "view == flinkJobs",
+          "group": "navigation@2"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "flink-notebooks.insertTable",
+          "when": "view == flinkCatalog && viewItem == table",
+          "group": "inline"
+        },
+        {
+          "command": "flink-notebooks.viewJobDetails",
+          "when": "view == flinkJobs && viewItem == job",
+          "group": "actions@1"
+        },
+        {
+          "command": "flink-notebooks.viewJobMetrics",
+          "when": "view == flinkJobs && viewItem == job",
+          "group": "actions@2"
+        },
+        {
+          "command": "flink-notebooks.openJobInWebUI",
+          "when": "view == flinkJobs && viewItem == job",
+          "group": "actions@3"
+        },
+        {
+          "command": "flink-notebooks.cancelJob",
+          "when": "view == flinkJobs && viewItem == job-running",
+          "group": "inline"
+        }
+      ],
+      "notebook/cell/execute": [
+        {
+          "command": "flink-notebooks.stopStreaming",
+          "when": "notebookType == flink-notebook && notebookCellType == code && notebookCellExecutionState == executing",
+          "group": "inline"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Flink Notebooks",
+      "properties": {
+        "flink-notebooks.gatewayPort": {
+          "type": "number",
+          "default": 8083,
+          "description": "Port for the SQL Gateway REST API"
+        },
+        "flink-notebooks.miniclusterJarPath": {
+          "type": "string",
+          "default": "",
+          "description": "Path to MiniCluster JAR file (leave empty for auto-detection)"
+        },
+        "flink-notebooks.javaPath": {
+          "type": "string",
+          "default": "",
+          "description": "Path to Java executable (leave empty to use JAVA_HOME or system PATH)"
+        },
+        "flink-notebooks.jvmMemory": {
+          "type": "string",
+          "default": "1024m",
+          "description": "JVM heap memory for MiniCluster (e.g., '1024m', '2g')"
+        },
+        "flink-notebooks.parallelism": {
+          "type": "number",
+          "default": 2,
+          "description": "Default parallelism level for Flink jobs"
+        },
+        "flink-notebooks.taskSlots": {
+          "type": "number",
+          "default": 2,
+          "description": "Number of task slots per TaskManager"
+        },
+        "flink-notebooks.awsProfile": {
+          "type": "string",
+          "default": "",
+          "description": "AWS profile name for Glue Catalog access"
+        },
+        "flink-notebooks.awsRegion": {
+          "type": "string",
+          "default": "us-east-1",
+          "description": "AWS region for Glue Catalog"
+        },
+        "flink-notebooks.autoStartCluster": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically start cluster when opening a notebook"
+        },
+        "flink-notebooks.jobRefreshInterval": {
+          "type": "number",
+          "default": 5000,
+          "description": "Auto-refresh interval for job monitoring (milliseconds)"
+        },
+        "flink-notebooks.streamingPollInterval": {
+          "type": "number",
+          "default": 500,
+          "description": "Interval between streaming result polls (milliseconds)"
+        },
+        "flink-notebooks.maxStreamingRows": {
+          "type": "number",
+          "default": 10000,
+          "description": "Maximum rows to display in streaming mode (0 = unlimited)"
+        },
+        "flink-notebooks.executionMode": {
+          "type": "string",
+          "enum": ["auto", "batch", "streaming"],
+          "default": "auto",
+          "description": "Flink execution mode: 'auto' (Flink decides), 'batch' (bounded tables only), 'streaming' (unbounded tables)"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "lint": "eslint src --ext ts",
+    "test": "node ./out/test/runTest.js"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.0",
+    "@types/vscode": "^1.85.0",
+    "@types/ws": "^8.5.10",
+    "@typescript-eslint/eslint-plugin": "^6.15.0",
+    "@typescript-eslint/parser": "^6.15.0",
+    "eslint": "^8.56.0",
+    "typescript": "^5.3.3"
+  },
+  "dependencies": {
+    "@aws-sdk/client-glue": "^3.709.0",
+    "@aws-sdk/credential-providers": "^3.709.0",
+    "axios": "^1.6.2",
+    "ws": "^8.16.0"
+  }
+}
