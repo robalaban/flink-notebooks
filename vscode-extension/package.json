@@ -19,10 +19,21 @@
     "data"
   ],
   "activationEvents": [
-    "onNotebook:flink-notebook"
+    "onNotebook:flink-notebook",
+    "onView:flinkCatalog",
+    "onView:flinkJobs"
   ],
   "main": "./out/extension.js",
   "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "flink-notebooks-sidebar",
+          "title": "Flink",
+          "icon": "resources/flink-icon.svg"
+        }
+      ]
+    },
     "notebooks": [
       {
         "type": "flink-notebook",
@@ -97,19 +108,27 @@
       }
     ],
     "views": {
-      "explorer": [
+      "flink-notebooks-sidebar": [
         {
           "id": "flinkCatalog",
-          "name": "Flink Catalog",
-          "when": "flink-notebooks:catalogAvailable"
+          "name": "Catalog"
         },
         {
           "id": "flinkJobs",
-          "name": "Flink Jobs",
-          "when": "flink-notebooks:clusterRunning"
+          "name": "Jobs"
         }
       ]
     },
+    "notebookRenderer": [
+      {
+        "id": "flink-table-renderer",
+        "displayName": "Flink Table Renderer",
+        "entrypoint": "./out/renderers/tableRendererScript.js",
+        "mimeTypes": [
+          "application/vnd.flink-table+json"
+        ]
+      }
+    ],
     "menus": {
       "view/title": [
         {
@@ -237,7 +256,9 @@
   },
   "scripts": {
     "vscode:prepublish": "npm run compile",
-    "compile": "tsc -p ./",
+    "compile": "npm run compile:extension && npm run compile:renderer",
+    "compile:extension": "tsc -p ./",
+    "compile:renderer": "tsc -p ./tsconfig.renderer.json",
     "watch": "tsc -watch -p ./",
     "lint": "eslint src --ext ts",
     "test": "node ./out/test/runTest.js"

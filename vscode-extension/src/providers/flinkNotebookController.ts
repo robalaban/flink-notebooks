@@ -153,44 +153,90 @@ export class FlinkNotebookController {
         attempts++;
       }
 
+      // Give Flink's result store time to materialize results after operation completes
+      // This is especially important for external catalogs (Iceberg, Hive, etc.)
+      console.log('Operation ready, waiting for result materialization...');
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+
       // Fetch first batch - wait for results to be ready
+      // For external catalogs (Iceberg, etc), there can be significant delay
+      // between operation completion and result materialization
       let fetchAttempts = 0;
-      const maxFetchAttempts = 20; // Wait up to 10 seconds for results to be ready
+      const maxFetchAttempts = 60; // Wait up to 30 seconds for results to be ready
+      const fetchRetryDelay = 500; // 500ms between retries
       let firstResult = await this.gatewayClient.fetchResults(sessionId, statementId, token, 100);
 
       while (fetchAttempts < maxFetchAttempts) {
-        console.log(`Fetch attempt ${fetchAttempts + 1}:`);
+        console.log(`Fetch attempt ${fetchAttempts + 1}/${maxFetchAttempts} (token ${token}):`);
         console.log(`  resultType: ${firstResult.resultType}`);
         console.log(`  isQueryResult: ${firstResult.isQueryResult}`);
         console.log(`  nextResultUri: ${firstResult.nextResultUri}`);
         console.log(`  results.data length: ${firstResult.results?.data?.length || 0}`);
-        console.log(`  data length: ${firstResult.data?.length || 0}`);
 
         const rawData = firstResult.results?.data || firstResult.data || [];
 
-        // Check if results are ready
+        // Per OpenAPI spec, resultType can be: NOT_READY, PAYLOAD, or EOS
+
+        // Case 1: EOS - End of Stream, no more data
+        if (firstResult.resultType === 'EOS') {
+          console.log('Received EOS (End of Stream) - query complete');
+          break;
+        }
+
+        // Case 2: PAYLOAD with data - success!
+        if (firstResult.resultType === 'PAYLOAD' && rawData.length > 0) {
+          console.log(`Received PAYLOAD with ${rawData.length} rows`);
+          break;
+        }
+
+        // Case 3: PAYLOAD with no data - this token is empty, try next token if available
+        if (firstResult.resultType === 'PAYLOAD' && rawData.length === 0) {
+          if (firstResult.nextResultUri) {
+            // Parse next token from URI
+            const nextUriToken = parseInt(firstResult.nextResultUri.split('/').pop() || '0');
+            if (nextUriToken > token) {
+              console.log(`Token ${token} empty, advancing to token ${nextUriToken}`);
+              token = nextUriToken;
+              fetchAttempts++;
+              firstResult = await this.gatewayClient.fetchResults(sessionId, statementId, token, 100);
+              continue;
+            } else {
+              // nextResultUri points to same or earlier token - this means we're waiting for data
+              console.log(`Empty PAYLOAD at token ${token}, nextResultUri=${firstResult.nextResultUri}, waiting...`);
+              await new Promise((resolve) => setTimeout(resolve, fetchRetryDelay));
+              fetchAttempts++;
+              firstResult = await this.gatewayClient.fetchResults(sessionId, statementId, token, 100);
+              continue;
+            }
+          } else {
+            // No nextResultUri and no data - wait for data to materialize
+            console.log(`Empty PAYLOAD at token ${token}, no nextResultUri, waiting for data...`);
+            await new Promise((resolve) => setTimeout(resolve, fetchRetryDelay));
+            fetchAttempts++;
+            firstResult = await this.gatewayClient.fetchResults(sessionId, statementId, token, 100);
+            continue;
+          }
+        }
+
+        // Case 4: NOT_READY - results not materialized yet, wait and retry same token
         if (firstResult.resultType === 'NOT_READY') {
-          // Results not ready yet, wait and retry
-          console.log('Results not ready yet, waiting...');
-          await new Promise((resolve) => setTimeout(resolve, 500));
+          console.log(`NOT_READY at token ${token}, waiting for materialization...`);
+          await new Promise((resolve) => setTimeout(resolve, fetchRetryDelay));
           fetchAttempts++;
           firstResult = await this.gatewayClient.fetchResults(sessionId, statementId, token, 100);
           continue;
         }
 
-        // Results are ready (PAYLOAD or EOS)
-        if (rawData.length > 0 || firstResult.resultType === 'EOS') {
-          console.log(`Results ready: rawData.length=${rawData.length}, resultType=${firstResult.resultType}`);
-          break;
-        }
-
-        // No data but not EOS - might need to check next token
-        console.log(`No data in current result, checking if more results available`);
-        break;
+        // Unexpected state - log and retry
+        console.log(`Unexpected state: resultType=${firstResult.resultType}, retrying...`);
+        await new Promise((resolve) => setTimeout(resolve, fetchRetryDelay));
+        fetchAttempts++;
+        firstResult = await this.gatewayClient.fetchResults(sessionId, statementId, token, 100);
       }
 
       if (fetchAttempts >= maxFetchAttempts) {
-        console.log(`Timeout waiting for results to be ready after ${maxFetchAttempts} attempts`);
+        console.log(`⚠️  Timeout waiting for results to be ready after ${maxFetchAttempts} attempts (${maxFetchAttempts * fetchRetryDelay / 1000}s)`);
+        console.log(`This may indicate results are not materializing. Proceeding with empty result set.`);
       }
 
       // Extract columns

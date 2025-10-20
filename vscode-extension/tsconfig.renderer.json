@@ -1,0 +1,10 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "module": "ES2020",
+    "moduleResolution": "node",
+    "lib": ["ES2020", "DOM"]
+  },
+  "include": ["src/renderers/**/*"],
+  "exclude": ["node_modules", ".vscode-test"]
+}
