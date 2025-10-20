@@ -102,9 +102,25 @@
         "icon": "$(debug-stop)"
       },
       {
-        "command": "flink-notebooks.stopStreaming",
-        "title": "Stop Streaming",
+        "command": "flink-notebooks.pauseStreaming",
+        "title": "Pause Streaming",
+        "icon": "$(debug-pause)"
+      },
+      {
+        "command": "flink-notebooks.resumeStreaming",
+        "title": "Resume Streaming",
+        "icon": "$(debug-continue)"
+      },
+      {
+        "command": "flink-notebooks.cancelOperation",
+        "title": "Cancel Job",
         "icon": "$(debug-stop)"
+      },
+      {
+        "command": "flink-notebooks.clearNotebookOutputs",
+        "title": "Flink: Clear All Outputs",
+        "category": "Flink",
+        "icon": "$(clear-all)"
       }
     ],
     "views": {
@@ -130,6 +146,13 @@
       }
     ],
     "menus": {
+      "notebook/toolbar": [
+        {
+          "command": "flink-notebooks.clearNotebookOutputs",
+          "when": "notebookType == flink-notebook",
+          "group": "navigation"
+        }
+      ],
       "view/title": [
         {
           "command": "flink-notebooks.refreshCatalog",
@@ -174,11 +197,21 @@
           "group": "inline"
         }
       ],
-      "notebook/cell/execute": [
+      "notebook/cell/title": [
         {
-          "command": "flink-notebooks.stopStreaming",
+          "command": "flink-notebooks.pauseStreaming",
+          "when": "notebookType == flink-notebook && notebookCellType == code && notebookCellExecutionState == executing && !flink-notebooks:streamingPaused",
+          "group": "inline@1"
+        },
+        {
+          "command": "flink-notebooks.resumeStreaming",
+          "when": "notebookType == flink-notebook && notebookCellType == code && notebookCellExecutionState == executing && flink-notebooks:streamingPaused",
+          "group": "inline@1"
+        },
+        {
+          "command": "flink-notebooks.cancelOperation",
           "when": "notebookType == flink-notebook && notebookCellType == code && notebookCellExecutionState == executing",
-          "group": "inline"
+          "group": "inline@2"
         }
       ]
     },

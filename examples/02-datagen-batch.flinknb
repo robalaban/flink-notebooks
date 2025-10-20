@@ -1,0 +1,128 @@
+{
+  "cells": [
+    {
+      "kind": 1,
+      "language": "markdown",
+      "value": "# DataGen Batch Example\n\nThis notebook demonstrates bounded (batch) data generation using Flink's DataGen connector.\n\nBy setting `number-of-rows`, we create a bounded table that produces a fixed number of rows and then completes.",
+      "metadata": {}
+    },
+    {
+      "kind": 2,
+      "language": "sql",
+      "value": "-- Create a bounded table that generates exactly 100 rows\n-- Uses sequence generator for predictable, ordered data\n\nCREATE TABLE orders_batch (\n  order_id INT,\n  customer_id INT,\n  product_id INT,\n  quantity INT,\n  price DECIMAL(10, 2),\n  order_time TIMESTAMP(3)\n) WITH (\n  'connector' = 'datagen',\n  'number-of-rows' = '100',\n  'rows-per-second' = '1000',\n  'fields.order_id.kind' = 'sequence',\n  'fields.order_id.start' = '1',\n  'fields.order_id.end' = '100',\n  'fields.customer_id.min' = '1',\n  'fields.customer_id.max' = '50',\n  'fields.product_id.min' = '1',\n  'fields.product_id.max' = '20',\n  'fields.quantity.min' = '1',\n  'fields.quantity.max' = '10',\n  'fields.price.min' = '10',\n  'fields.price.max' = '500'\n);",
+      "metadata": {
+        "statement_id": "cbc221fc-d436-4197-b5bd-9d61a87916b0"
+      }
+    },
+    {
+      "kind": 1,
+      "language": "markdown",
+      "value": "## Query Batch Data\n\nThis query will fetch all 100 rows and complete (showing EOS - End of Stream).\n\nSince the table is bounded, the query finishes after reading all rows.",
+      "metadata": {}
+    },
+    {
+      "kind": 2,
+      "language": "sql",
+      "value": "-- Simple SELECT - will return 100 rows and complete\n\nSELECT \n  order_id,\n  customer_id,\n  product_id,\n  quantity,\n  price,\n  order_time\nFROM orders_batch;",
+      "metadata": {
+        "statement_id": "2235c2ec-5568-406f-ae61-7fb88658de09",
+        "is_streaming": true,
+        "streaming_started": 1760986306593,
+        "total_rows_fetched": 100
+      }
+    },
+    {
+      "kind": 1,
+      "language": "markdown",
+      "value": "## Aggregation on Batch Data\n\nBatch mode is perfect for analytical queries with aggregations.",
+      "metadata": {}
+    },
+    {
+      "kind": 2,
+      "language": "sql",
+      "value": "-- Have to set runtime mode to batch for bounded tables\n\nSET 'execution.runtime-mode' = 'batch';",
+      "metadata": {
+        "statement_id": "bff156d7-431c-4a09-a41c-9c2cc268058e",
+        "is_streaming": true,
+        "streaming_started": 1760986523829,
+        "total_rows_fetched": 1
+      }
+    },
+    {
+      "kind": 2,
+      "language": "sql",
+      "value": "-- Aggregate: Total revenue per product\n\nSELECT\n  product_id,\n  COUNT(*) as order_count,\n  SUM(quantity) as total_quantity,\n  SUM(price * quantity) as total_revenue,\n  AVG(price) as avg_price\nFROM orders_batch\nGROUP BY product_id\nORDER BY total_revenue DESC;",
+      "metadata": {
+        "statement_id": "380ae6bd-9f3c-4522-b155-1650d62f00a8",
+        "is_streaming": true,
+        "streaming_started": 1760986528458,
+        "total_rows_fetched": 19
+      }
+    },
+    {
+      "kind": 1,
+      "language": "markdown",
+      "value": "## Top Customers\n\nFind the top 10 customers by order count.",
+      "metadata": {}
+    },
+    {
+      "kind": 2,
+      "language": "sql",
+      "value": "-- Top 10 customers by number of orders\n\nSELECT \n  customer_id,\n  COUNT(*) as order_count,\n  SUM(price * quantity) as total_spent,\n  AVG(quantity) as avg_quantity\nFROM orders_batch\nGROUP BY customer_id\nORDER BY order_count DESC, total_spent DESC\nLIMIT 10;",
+      "metadata": {}
+    },
+    {
+      "kind": 1,
+      "language": "markdown",
+      "value": "## Complex Types Example\n\nDataGen also supports complex types like ROW, ARRAY, and MAP.",
+      "metadata": {}
+    },
+    {
+      "kind": 2,
+      "language": "sql",
+      "value": "-- Create table with complex types\n\nCREATE TABLE products_with_metadata (\n  product_id INT,\n  product_name STRING,\n  details ROW<category STRING, brand STRING>,\n  tags ARRAY<STRING>,\n  created_at TIMESTAMP(3)\n) WITH (\n  'connector' = 'datagen',\n  'number-of-rows' = '50',\n  'rows-per-second' = '1000',\n  'fields.product_id.kind' = 'sequence',\n  'fields.product_id.start' = '1',\n  'fields.product_id.end' = '50',\n  'fields.product_name.length' = '15',\n  'fields.details.category.length' = '10',\n  'fields.details.brand.length' = '8'\n);",
+      "metadata": {
+        "statement_id": "06080dd8-41ed-4ce2-9b31-15b5dff23dce",
+        "is_streaming": true,
+        "streaming_started": 1760986247839,
+        "total_rows_fetched": 1
+      }
+    },
+    {
+      "kind": 2,
+      "language": "sql",
+      "value": "-- Query complex types\n\nSELECT \n  product_id,\n  product_name,\n  details,\n  tags,\n  created_at\nFROM products_with_metadata;",
+      "metadata": {
+        "statement_id": "7d20f269-b3c5-4498-8069-c7061290e2f1",
+        "is_streaming": true,
+        "streaming_started": 1760986250991,
+        "total_rows_fetched": 50
+      }
+    },
+    {
+      "kind": 1,
+      "language": "markdown",
+      "value": "## Clean Up\n\nDrop the tables when finished.",
+      "metadata": {}
+    },
+    {
+      "kind": 2,
+      "language": "sql",
+      "value": "DROP TABLE IF EXISTS orders_batch;",
+      "metadata": {
+        "statement_id": "b4a6bcc3-bfc6-46a9-99a9-24b22ba3652a",
+        "is_streaming": true,
+        "streaming_started": 1760986572127,
+        "total_rows_fetched": 1
+      }
+    },
+    {
+      "kind": 2,
+      "language": "sql",
+      "value": "DROP TABLE IF EXISTS products_with_metadata;",
+      "metadata": {
+        "statement_id": "1a173f3e-f675-401a-80c3-94b521ca99d5"
+      }
+    }
+  ]
+}

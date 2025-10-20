@@ -1,0 +1,63 @@
+{
+  "cells": [
+    {
+      "kind": 1,
+      "language": "markdown",
+      "value": "# DataGen Streaming Example\n\nThis notebook demonstrates streaming data generation using Flink's built-in DataGen connector.\n\nThe DataGen connector generates in-memory data continuously, which later we can pool.",
+      "metadata": {}
+    },
+    {
+      "kind": 2,
+      "language": "sql",
+      "value": "-- Create a streaming table that generates click events\n-- This will produce 2 rows per second indefinitely\n\nCREATE TABLE clickstream (\n  user_id INT,\n  page_id INT,\n  action STRING,\n  event_time TIMESTAMP(3),\n  WATERMARK FOR event_time AS event_time - INTERVAL '5' SECOND\n) WITH (\n  'connector' = 'datagen',\n  'rows-per-second' = '2',\n  'fields.user_id.min' = '1',\n  'fields.user_id.max' = '100',\n  'fields.page_id.min' = '1',\n  'fields.page_id.max' = '20',\n  'fields.action.length' = '10'\n);",
+      "metadata": {
+        "statement_id": "fd89a835-bfb9-4f4b-b8f8-fd6e2c0facba",
+        "is_streaming": true,
+        "streaming_started": 1760985422819,
+        "total_rows_fetched": 1
+      }
+    },
+    {
+      "kind": 1,
+      "language": "markdown",
+      "value": "## Query Streaming Data\n\nNow let's query the streaming table. This will continuously show new rows as they're generated.\n\n**Note:** Use the \"Pause Streaming\" button in the cell toolbar to temporarly stop the UI form pooling for new records. If then we \"Unpause Streaming\" it will pull all new data that has been generated. ",
+      "metadata": {}
+    },
+    {
+      "kind": 2,
+      "language": "sql",
+      "value": "-- Select from the streaming table\n\nSELECT \n  user_id,\n  page_id,\n  action,\n  event_time\nFROM clickstream;",
+      "metadata": {
+        "statement_id": "1970c2ee-3e93-4045-9846-42deb017ed47",
+        "is_streaming": true,
+        "streaming_started": 1760985431274,
+        "total_rows_fetched": 336,
+        "streaming_paused": false
+      }
+    },
+    {
+      "kind": 1,
+      "language": "markdown",
+      "value": "## Streaming Aggregation\n\nLet's create a more interesting query with windowing and aggregation.\n\nThis query uses 10-second tumbling windows to count clicks per page.",
+      "metadata": {}
+    },
+    {
+      "kind": 2,
+      "language": "sql",
+      "value": "-- Tumbling window aggregation\n-- Count clicks per page in 10-second windows\n\nSELECT \n  page_id,\n  COUNT(*) as click_count,\n  TUMBLE_START(event_time, INTERVAL '10' SECOND) as window_start,\n  TUMBLE_END(event_time, INTERVAL '10' SECOND) as window_end\nFROM clickstream\nGROUP BY \n  page_id,\n  TUMBLE(event_time, INTERVAL '10' SECOND);",
+      "metadata": {}
+    },
+    {
+      "kind": 1,
+      "language": "markdown",
+      "value": "## Clean Up\n\nDrop the table when you're done testing.",
+      "metadata": {}
+    },
+    {
+      "kind": 2,
+      "language": "sql",
+      "value": "DROP TABLE IF EXISTS clickstream;",
+      "metadata": {}
+    }
+  ]
+}

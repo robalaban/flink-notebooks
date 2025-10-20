@@ -18,6 +18,7 @@ interface StreamingCellInfo {
   statementId: string;
   jobId?: string;
   stopRequested: boolean;
+  paused: boolean;
 }
 
 export class FlinkNotebookController {
@@ -278,7 +279,11 @@ export class FlinkNotebookController {
           statementId,
           jobId,
           stopRequested: false,
+          paused: false,
         });
+
+        // Set context for button visibility (initially not paused)
+        await vscode.commands.executeCommand('setContext', 'flink-notebooks:streamingPaused', false);
 
         // Display first batch immediately
         this.updateStreamingOutput(cell, execution, rows, columns);
@@ -447,6 +452,13 @@ export class FlinkNotebookController {
         break;
       }
 
+      // Check if streaming is paused
+      if (streamingInfo?.paused) {
+        // Wait a bit and check again (don't poll for new data while paused)
+        await new Promise((resolve) => setTimeout(resolve, pollInterval));
+        continue;
+      }
+
       try {
         const result = await this.gatewayClient.fetchResults(sessionId, statementId, token, 100);
         const rawData = result.results?.data || result.data || [];
@@ -580,11 +592,14 @@ export class FlinkNotebookController {
   ): void {
     const startTime = cell.metadata?.streaming_started || Date.now();
     const duration = this.formatDuration(Date.now() - startTime);
+    const isPaused = cell.metadata?.streaming_paused === true;
 
     const outputs: vscode.NotebookCellOutputItem[] = [];
 
-    // Streaming header
-    const header = `🟢 **Streaming** | ${rows.length.toLocaleString()} rows | ${duration}\n\n`;
+    // Streaming header with pause indicator
+    const statusIcon = isPaused ? '⏸️' : '🟢';
+    const statusText = isPaused ? '**Paused**' : '**Streaming**';
+    const header = `${statusIcon} ${statusText} | ${rows.length.toLocaleString()} rows | ${duration}\n\n`;
 
     // Create markdown table with header
     const markdown = header + this.createMarkdownTable(rows, columns);
@@ -593,7 +608,7 @@ export class FlinkNotebookController {
     // Add JSON data
     outputs.push(
       vscode.NotebookCellOutputItem.json(
-        { rows, columns, streaming: true },
+        { rows, columns, streaming: true, paused: isPaused },
         'application/vnd.flink-table+json'
       )
     );
@@ -737,6 +752,100 @@ export class FlinkNotebookController {
     if (streamingInfo) {
       streamingInfo.stopRequested = true;
       console.log(`Streaming stop requested for cell ${cellKey}`);
+    }
+  }
+
+  /**
+   * Pause streaming for a specific cell (keeps job running, stops polling)
+   */
+  async pauseStreaming(cell: vscode.NotebookCell): Promise<void> {
+    const cellKey = this.getCellKey(cell);
+    const streamingInfo = this.streamingCells.get(cellKey);
+
+    if (streamingInfo) {
+      streamingInfo.paused = true;
+      await this.updateCellMetadata(cell, {
+        streaming_paused: true,
+      });
+
+      // Set context for button visibility
+      await vscode.commands.executeCommand('setContext', 'flink-notebooks:streamingPaused', true);
+
+      // Refresh UI to show paused state
+      const rows = cell.metadata?.total_rows_fetched || 0;
+      const rawRows = cell.outputs?.[0]?.items?.[1]?.data;
+      if (rawRows) {
+        try {
+          const data = JSON.parse(new TextDecoder().decode(rawRows as Uint8Array));
+          this.updateStreamingOutput(cell, streamingInfo.execution, data.rows, data.columns);
+        } catch (error) {
+          console.error('Error refreshing paused output:', error);
+        }
+      }
+
+      console.log(`Streaming paused for cell ${cellKey}`);
+    }
+  }
+
+  /**
+   * Resume streaming for a specific cell
+   */
+  async resumeStreaming(cell: vscode.NotebookCell): Promise<void> {
+    const cellKey = this.getCellKey(cell);
+    const streamingInfo = this.streamingCells.get(cellKey);
+
+    if (streamingInfo) {
+      streamingInfo.paused = false;
+      await this.updateCellMetadata(cell, {
+        streaming_paused: false,
+      });
+
+      // Set context for button visibility
+      await vscode.commands.executeCommand('setContext', 'flink-notebooks:streamingPaused', false);
+
+      // Refresh UI to show streaming state
+      const rawRows = cell.outputs?.[0]?.items?.[1]?.data;
+      if (rawRows) {
+        try {
+          const data = JSON.parse(new TextDecoder().decode(rawRows as Uint8Array));
+          this.updateStreamingOutput(cell, streamingInfo.execution, data.rows, data.columns);
+        } catch (error) {
+          console.error('Error refreshing resumed output:', error);
+        }
+      }
+
+      console.log(`Streaming resumed for cell ${cellKey}`);
+    }
+  }
+
+  /**
+   * Cancel the operation/job for a specific cell
+   */
+  async cancelOperation(cell: vscode.NotebookCell): Promise<void> {
+    const cellKey = this.getCellKey(cell);
+    const streamingInfo = this.streamingCells.get(cellKey);
+
+    if (streamingInfo) {
+      // Mark as stop requested to exit polling loop
+      streamingInfo.stopRequested = true;
+
+      // Cancel the operation via SQL Gateway
+      try {
+        await this.gatewayClient.cancelOperation(
+          streamingInfo.sessionId,
+          streamingInfo.statementId
+        );
+        console.log(`Operation canceled for cell ${cellKey}`);
+      } catch (error) {
+        console.error('Error canceling operation:', error);
+        throw error;
+      }
+
+      // Clear context for button visibility
+      await vscode.commands.executeCommand('setContext', 'flink-notebooks:streamingPaused', false);
+
+      // Clean up
+      this.streamingCells.delete(cellKey);
     }
   }
 

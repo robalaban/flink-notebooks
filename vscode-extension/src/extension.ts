@@ -191,11 +191,120 @@ function registerCommands(context: vscode.ExtensionContext) {
     })
   );
 
-  // Stop streaming
+  // Pause streaming
   context.subscriptions.push(
-    vscode.commands.registerCommand('flink-notebooks.stopStreaming', async (cell: vscode.NotebookCell) => {
-      await notebookController.stopStreaming(cell);
-      vscode.window.showInformationMessage('Streaming stopped');
+    vscode.commands.registerCommand('flink-notebooks.pauseStreaming', async (cell: vscode.NotebookCell) => {
+      try {
+        await notebookController.pauseStreaming(cell);
+        vscode.window.showInformationMessage('Streaming paused');
+      } catch (error) {
+        vscode.window.showErrorMessage(
+          `Failed to pause streaming: ${error instanceof Error ? error.message : String(error)}`
+        );
+      }
+    })
+  );
+
+  // Resume streaming
+  context.subscriptions.push(
+    vscode.commands.registerCommand('flink-notebooks.resumeStreaming', async (cell: vscode.NotebookCell) => {
+      try {
+        await notebookController.resumeStreaming(cell);
+        vscode.window.showInformationMessage('Streaming resumed');
+      } catch (error) {
+        vscode.window.showErrorMessage(
+          `Failed to resume streaming: ${error instanceof Error ? error.message : String(error)}`
+        );
+      }
+    })
+  );
+
+  // Cancel operation
+  context.subscriptions.push(
+    vscode.commands.registerCommand('flink-notebooks.cancelOperation', async (cell: vscode.NotebookCell) => {
+      const confirmation = await vscode.window.showWarningMessage(
+        'Cancel this operation? The job will be stopped and cannot be resumed.',
+        { modal: true },
+        'Cancel Job'
+      );
+
+      if (confirmation === 'Cancel Job') {
+        try {
+          await notebookController.cancelOperation(cell);
+          vscode.window.showInformationMessage('Operation canceled successfully');
+        } catch (error) {
+          vscode.window.showErrorMessage(
+            `Failed to cancel operation: ${error instanceof Error ? error.message : String(error)}`
+          );
+        }
+      }
+    })
+  );
+
+  // Clear notebook outputs
+  context.subscriptions.push(
+    vscode.commands.registerCommand('flink-notebooks.clearNotebookOutputs', async () => {
+      const editor = vscode.window.activeNotebookEditor;
+      if (!editor) {
+        vscode.window.showWarningMessage('No active notebook found');
+        return;
+      }
+
+      const notebook = editor.notebook;
+      if (notebook.notebookType !== 'flink-notebook') {
+        vscode.window.showWarningMessage('Active notebook is not a Flink notebook');
+        return;
+      }
+
+      const confirmation = await vscode.window.showWarningMessage(
+        `Clear all outputs from "${notebook.uri.fsPath.split('/').pop()}"?\n\nThis will remove all cell outputs, making the notebook safe for version control.`,
+        { modal: true },
+        'Clear Outputs'
+      );
+
+      if (confirmation === 'Clear Outputs') {
+        try {
+          const edit = new vscode.WorkspaceEdit();
+          const edits: vscode.NotebookEdit[] = [];
+
+          // Clear outputs for all cells
+          for (let i = 0; i < notebook.cellCount; i++) {
+            const cell = notebook.cellAt(i);
+            if (cell.outputs.length > 0) {
+              // Replace the cell with same content but no outputs
+              const newCell = new vscode.NotebookCellData(
+                cell.kind,
+                cell.document.getText(),
+                cell.document.languageId
+              );
+              newCell.metadata = cell.metadata;
+              newCell.outputs = []; // Clear outputs
+
+              edits.push(
+                vscode.NotebookEdit.replaceCells(
+                  new vscode.NotebookRange(i, i + 1),
+                  [newCell]
+                )
+              );
+            }
+          }
+
+          edit.set(notebook.uri, edits);
+          const success = await vscode.workspace.applyEdit(edit);
+
+          if (success) {
+            vscode.window.showInformationMessage(
+              `Cleared outputs from ${notebook.cellCount} cells. Ready for GitHub!`
+            );
+          } else {
+            vscode.window.showErrorMessage('Failed to clear outputs');
+          }
+        } catch (error) {
+          vscode.window.showErrorMessage(
+            `Failed to clear outputs: ${error instanceof Error ? error.message : String(error)}`
+          );
+        }
+      }
     })
   );
 
