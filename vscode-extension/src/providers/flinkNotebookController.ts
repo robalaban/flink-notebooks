@@ -893,11 +893,33 @@ export class FlinkNotebookController {
   }
 
   dispose(): void {
-    // Stop all streaming cells
+    // Cancel all streaming operations before disposal
+    const cancelPromises: Promise<void>[] = [];
+
     for (const [key, info] of this.streamingCells.entries()) {
       info.stopRequested = true;
+
+      // Cancel the operation in SQL Gateway to stop the Flink job
+      const cancelPromise = this.gatewayClient
+        .cancelOperation(info.sessionId, info.statementId)
+        .then(() => {
+          console.log(`Cancelled streaming operation ${info.statementId} for cell ${key}`);
+        })
+        .catch((error) => {
+          // Ignore errors - operation might already be finished/cancelled
+          console.log(`Could not cancel operation ${info.statementId}: ${error.message}`);
+        });
+
+      cancelPromises.push(cancelPromise);
     }
-    this.streamingCells.clear();
+
+    // Wait briefly for cancellations to complete (don't block disposal indefinitely)
+    Promise.all(cancelPromises)
+      .then(() => console.log('All streaming operations cancelled'))
+      .catch(() => console.log('Some streaming operations could not be cancelled'))
+      .finally(() => {
+        this.streamingCells.clear();
+      });
 
     this._onStatementExecuted.dispose();
     this.controller.dispose();

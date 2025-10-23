@@ -24,9 +24,15 @@ let notebookController: FlinkNotebookController;
 let catalogTreeProvider: CatalogTreeProvider;
 let jobMonitorProvider: JobMonitorProvider;
 let statusBarItem: vscode.StatusBarItem;
+let outputChannel: vscode.OutputChannel;
 
 export async function activate(context: vscode.ExtensionContext) {
   console.log('Flink Notebooks extension activating...');
+
+  // Create output channel for extension logs
+  outputChannel = vscode.window.createOutputChannel('Flink Notebooks');
+  context.subscriptions.push(outputChannel);
+  outputChannel.appendLine('Flink Notebooks extension activating...');
 
   // Get configuration
   const config = vscode.workspace.getConfiguration('flink-notebooks');
@@ -36,6 +42,7 @@ export async function activate(context: vscode.ExtensionContext) {
   const parallelism = config.get<number>('parallelism');
   const taskSlots = config.get<number>('taskSlots');
   const jarPath = config.get<string>('miniclusterJarPath');
+  const connectorLibraryPath = config.get<string>('connectorLibraryPath');
 
   // Initialize cluster manager
   clusterManager = new ClusterManager({
@@ -45,6 +52,13 @@ export async function activate(context: vscode.ExtensionContext) {
     taskSlots: taskSlots || undefined,
     gatewayPort,
     jarPath: jarPath || undefined,
+    connectorLibraryPath: connectorLibraryPath || undefined,
+  });
+
+  // Set up logger to route cluster logs to output channel
+  clusterManager.setLogger({
+    log: (message: string) => outputChannel.appendLine(message),
+    error: (message: string) => outputChannel.appendLine(`[ERROR] ${message}`),
   });
 
   // Initialize SQL Gateway client
@@ -97,6 +111,39 @@ export async function activate(context: vscode.ExtensionContext) {
   statusBarItem.command = 'flink-notebooks.showClusterStatus';
   context.subscriptions.push(statusBarItem);
 
+  // Register crash handler to notify user when cluster crashes
+  // Must be after statusBarItem is created so we can update it
+  clusterManager.onCrash((exitCode) => {
+    const message = exitCode !== null
+      ? `Flink cluster crashed unexpectedly with exit code ${exitCode}.`
+      : 'Flink cluster encountered an error and stopped.';
+
+    // Log to output channel
+    outputChannel.appendLine(`[ERROR] ${message}`);
+    outputChannel.appendLine('Check the Flink Notebooks output channel for details.');
+
+    // Update status bar immediately to show crashed state
+    updateStatusBar('Crashed');
+
+    vscode.window.showErrorMessage(message, 'View Logs', 'Restart Cluster').then((choice) => {
+      if (choice === 'View Logs') {
+        outputChannel.show();
+      } else if (choice === 'Restart Cluster') {
+        vscode.commands.executeCommand('flink-notebooks.startCluster');
+      }
+    });
+
+    // Update other UI components if they exist
+    if (jobMonitorProvider) {
+      jobMonitorProvider.refresh();
+    }
+    if (catalogTreeProvider) {
+      // Suppress notifications temporarily to avoid double-notification
+      catalogTreeProvider.setSuppressNotifications(true, 2000);
+      catalogTreeProvider.refresh();
+    }
+  });
+
   // Register commands
   registerCommands(context);
 
@@ -120,13 +167,30 @@ export async function activate(context: vscode.ExtensionContext) {
   console.log('Flink Notebooks extension activated');
 }
 
-export function deactivate() {
+export async function deactivate() {
   console.log('Flink Notebooks extension deactivating...');
 
   // Clean up session
   if (sessionManager) {
-    sessionManager.closeSession().catch(console.error);
+    try {
+      await sessionManager.closeSession();
+      console.log('Session closed successfully');
+    } catch (error) {
+      console.error('Error closing session:', error);
+    }
   }
+
+  // Stop the cluster to prevent orphaned Java processes
+  if (clusterManager) {
+    try {
+      await clusterManager.stop();
+      console.log('Cluster stopped successfully');
+    } catch (error) {
+      console.error('Error stopping cluster:', error);
+    }
+  }
+
+  console.log('Flink Notebooks extension deactivated');
 }
 
 function registerCommands(context: vscode.ExtensionContext) {
@@ -419,6 +483,11 @@ async function startCluster(): Promise<void> {
     // Enable catalog view
     vscode.commands.executeCommand('setContext', 'flink-notebooks:catalogAvailable', true);
 
+    // Refresh catalog tree to show available catalogs
+    if (catalogTreeProvider) {
+      catalogTreeProvider.refresh();
+    }
+
     // Enable job monitor and start auto-refresh
     vscode.commands.executeCommand('setContext', 'flink-notebooks:clusterRunning', true);
     jobMonitorProvider.startAutoRefresh();
@@ -434,14 +503,27 @@ async function stopCluster(): Promise<void> {
   try {
     updateStatusBar('Stopping...', true);
 
+    // Stop the cluster first
     await clusterManager.stop();
-    await sessionManager.closeSession();
+
+    // Try to close the session, but don't fail if it's already gone
+    try {
+      await sessionManager.closeSession();
+    } catch (sessionError) {
+      // Session might already be closed due to cluster shutdown, ignore
+      console.log('Session close failed (expected after cluster stop):', sessionError);
+    }
 
     vscode.window.showInformationMessage('Flink cluster stopped');
     updateStatusBar('Stopped');
 
     // Disable catalog view
     vscode.commands.executeCommand('setContext', 'flink-notebooks:catalogAvailable', false);
+
+    // Refresh catalog tree to show stopped state
+    if (catalogTreeProvider) {
+      catalogTreeProvider.refresh();
+    }
 
     // Disable job monitor and stop auto-refresh
     vscode.commands.executeCommand('setContext', 'flink-notebooks:clusterRunning', false);
@@ -450,6 +532,15 @@ async function stopCluster(): Promise<void> {
     vscode.window.showErrorMessage(
       `Failed to stop cluster: ${error instanceof Error ? error.message : String(error)}`
     );
+    updateStatusBar('Stopped'); // Still update to stopped even if there was an error
+
+    // Still clean up UI state
+    vscode.commands.executeCommand('setContext', 'flink-notebooks:catalogAvailable', false);
+    vscode.commands.executeCommand('setContext', 'flink-notebooks:clusterRunning', false);
+    jobMonitorProvider.stopAutoRefresh();
+    if (catalogTreeProvider) {
+      catalogTreeProvider.refresh();
+    }
   }
 }
 

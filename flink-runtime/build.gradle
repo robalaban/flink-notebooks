@@ -27,7 +27,7 @@ ext {
 }
 
 dependencies {
-    // Flink Core
+    // Flink Core Runtime
     implementation "org.apache.flink:flink-runtime:${flinkVersion}"
     implementation "org.apache.flink:flink-clients:${flinkVersion}"
     implementation "org.apache.flink:flink-runtime-web:${flinkVersion}"
@@ -43,33 +43,25 @@ dependencies {
     // JSON format support (required by SQL Gateway's ResultInfoSerializer)
     implementation "org.apache.flink:flink-json:${flinkVersion}"
 
-    // Connector Base (required by many connectors)
+    // Basic Connectors (filesystem, datagen - minimal overhead)
     implementation "org.apache.flink:flink-connector-base:${flinkVersion}"
     implementation "org.apache.flink:flink-connector-files:${flinkVersion}"
-
-    // Apache Iceberg
-    implementation "org.apache.iceberg:iceberg-flink-runtime-1.20:${icebergVersion}"
-
-    // AWS SDK
-    implementation "software.amazon.awssdk:bundle:${awsSdkVersion}"
-
-    // S3 Filesystem
-    implementation "org.apache.flink:flink-s3-fs-presto:${flinkVersion}"
-
-    // Hadoop Dependencies
-    implementation "org.apache.hadoop:hadoop-common:${hadoopVersion}"
-    implementation "org.apache.hadoop:hadoop-client:${hadoopVersion}"
-    implementation "org.apache.hadoop:hadoop-client-api:${hadoopVersion}"
-    implementation "org.apache.hadoop:hadoop-client-runtime:${hadoopVersion}"
-
-    // Database Connectors
-    implementation "org.postgresql:postgresql:${postgresVersion}"
-    implementation "org.apache.flink:flink-connector-jdbc:${flinkJdbcConnectorVersion}"
-    implementation "org.apache.flink:flink-sql-connector-postgres-cdc:${flinkPostgresCdcVersion}"
 
     // Logging
     implementation 'org.slf4j:slf4j-api:2.0.9'
     implementation 'org.slf4j:slf4j-simple:2.0.9'
+    compileOnly "org.apache.iceberg:iceberg-flink-runtime-1.20:${icebergVersion}"
+
+    compileOnly "software.amazon.awssdk:bundle:${awsSdkVersion}"
+    compileOnly "org.apache.flink:flink-s3-fs-presto:${flinkVersion}"
+    compileOnly "org.apache.hadoop:hadoop-common:${hadoopVersion}"
+    compileOnly "org.apache.hadoop:hadoop-client:${hadoopVersion}"
+    compileOnly "org.apache.hadoop:hadoop-client-api:${hadoopVersion}"
+    compileOnly "org.apache.hadoop:hadoop-client-runtime:${hadoopVersion}"
+
+    compileOnly "org.postgresql:postgresql:${postgresVersion}"
+    compileOnly "org.apache.flink:flink-connector-jdbc:${flinkJdbcConnectorVersion}"
+    compileOnly "org.apache.flink:flink-sql-connector-postgres-cdc:${flinkPostgresCdcVersion}"
 }
 
 application {

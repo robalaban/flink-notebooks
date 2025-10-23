@@ -283,6 +283,11 @@
           "enum": ["auto", "batch", "streaming"],
           "default": "auto",
           "description": "Flink execution mode: 'auto' (Flink decides), 'batch' (bounded tables only), 'streaming' (unbounded tables)"
+        },
+        "flink-notebooks.connectorLibraryPath": {
+          "type": "string",
+          "default": "",
+          "description": "Path to directory containing connector JARs (Iceberg, Kafka, AWS, etc.). If empty, uses default lib/ directory in flink-runtime. See CONNECTORS.md for details."
         }
       }
     }

@@ -11,6 +11,7 @@ export class CatalogTreeProvider implements vscode.TreeDataProvider<CatalogTreeI
   readonly onDidChangeTreeData = this._onDidChangeTreeData.event;
 
   private catalogTree: CatalogNode[] | null = null;
+  private suppressNotifications: boolean = false;
 
   constructor(
     private catalogService: CatalogService,
@@ -24,6 +25,18 @@ export class CatalogTreeProvider implements vscode.TreeDataProvider<CatalogTreeI
           this.refresh();
         }
       });
+    }
+  }
+
+  /**
+   * Suppress notifications for a brief period (e.g., after cluster crash)
+   */
+  setSuppressNotifications(suppress: boolean, durationMs: number = 2000): void {
+    this.suppressNotifications = suppress;
+    if (suppress && durationMs > 0) {
+      setTimeout(() => {
+        this.suppressNotifications = false;
+      }, durationMs);
     }
   }
 
@@ -73,14 +86,17 @@ export class CatalogTreeProvider implements vscode.TreeDataProvider<CatalogTreeI
         // Check if Flink is available
         const isAvailable = await this.catalogService.isAvailable();
         if (!isAvailable) {
-          vscode.window.showWarningMessage(
-            'Flink cluster is not running. Start the cluster to view catalogs.',
-            'Start Cluster'
-          ).then((action) => {
-            if (action === 'Start Cluster') {
-              vscode.commands.executeCommand('flink-notebooks.startCluster');
-            }
-          });
+          // Only show notification if not suppressed (e.g., not right after a crash)
+          if (!this.suppressNotifications) {
+            vscode.window.showWarningMessage(
+              'Flink cluster is not running. Start the cluster to view catalogs.',
+              'Start Cluster'
+            ).then((action) => {
+              if (action === 'Start Cluster') {
+                vscode.commands.executeCommand('flink-notebooks.startCluster');
+              }
+            });
+          }
 
           return this.createEmptyState('Flink cluster not running');
         }
@@ -109,17 +125,20 @@ export class CatalogTreeProvider implements vscode.TreeDataProvider<CatalogTreeI
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error);
 
-        vscode.window.showErrorMessage(
-          `Failed to load catalogs: ${errorMessage}`,
-          'Retry',
-          'Start Cluster'
-        ).then((action) => {
-          if (action === 'Retry') {
-            this.refresh();
-          } else if (action === 'Start Cluster') {
-            vscode.commands.executeCommand('flink-notebooks.startCluster');
-          }
-        });
+        // Only show notification if not suppressed (e.g., not right after a crash)
+        if (!this.suppressNotifications) {
+          vscode.window.showErrorMessage(
+            `Failed to load catalogs: ${errorMessage}`,
+            'Retry',
+            'Start Cluster'
+          ).then((action) => {
+            if (action === 'Retry') {
+              this.refresh();
+            } else if (action === 'Start Cluster') {
+              vscode.commands.executeCommand('flink-notebooks.startCluster');
+            }
+          });
+        }
 
         return this.createEmptyState('Error loading catalogs');
       }

@@ -12,10 +12,19 @@ import org.apache.flink.table.gateway.service.session.SessionManagerImpl;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.File;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.util.ArrayList;
 import java.util.Collections;
+import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 /**
  * Runner for Flink MiniCluster with embedded SQL Gateway.
@@ -111,17 +120,32 @@ public class MiniClusterRunner {
         gatewayConfig.setString("rest.bind-address", "0.0.0.0");
 
         // Create executor service for SQL Gateway operations
+        // Non-daemon threads ensure operations complete before JVM shutdown
         operationExecutor = Executors.newFixedThreadPool(
             10,
             r -> {
                 Thread thread = new Thread(r);
                 thread.setName("sql-gateway-operation-" + thread.getId());
-                thread.setDaemon(true);
+                thread.setDaemon(false); // Non-daemon to prevent premature termination
                 return thread;
             }
         );
 
+        // Scan and log external connector JARs from lib directory
+        // Note: These JARs are already loaded via the system classpath (java -cp)
+        // so we don't need to pass them to DefaultContext.load()
+        List<java.net.URL> additionalJars = scanLibDirectory();
+        if (!additionalJars.isEmpty()) {
+            LOG.info("Found {} connector JAR(s) in lib directory (loaded via system classpath)", additionalJars.size());
+            for (java.net.URL jar : additionalJars) {
+                LOG.info("  - {}", jar);
+            }
+        } else {
+            LOG.info("No connector JARs found in lib directory (this is normal for minimal setup)");
+        }
+
         // Load DefaultContext with the session configuration (for connecting to MiniCluster)
+        // Pass empty list for JARs since they're already in the system classpath
         DefaultContext defaultContext = DefaultContext.load(sessionConfig, Collections.emptyList(), true);
 
         SessionManagerImpl sessionManager = new SessionManagerImpl(defaultContext);
@@ -129,24 +153,39 @@ public class MiniClusterRunner {
         SqlGatewayServiceImpl gatewayService = new SqlGatewayServiceImpl(sessionManager);
 
         // Set the executor service in SessionManagerImpl via reflection
+        // Note: This is necessary because Flink 1.20.0 doesn't expose a public API
+        // for custom executor injection. This approach is fragile and may break
+        // with Flink version upgrades.
         try {
-            java.lang.reflect.Field operationExecutorField = SessionManagerImpl.class.getDeclaredField("operationExecutorService");
-            operationExecutorField.setAccessible(true);
-            operationExecutorField.set(sessionManager, operationExecutor);
+            injectOperationExecutor(sessionManager, operationExecutor);
 
             cleanupExecutor = Executors.newScheduledThreadPool(1, r -> {
                 Thread thread = new Thread(r);
                 thread.setName("sql-gateway-cleanup");
-                thread.setDaemon(true);
+                thread.setDaemon(false); // Non-daemon to ensure proper cleanup
                 return thread;
             });
-            java.lang.reflect.Field cleanupServiceField = SessionManagerImpl.class.getDeclaredField("cleanupService");
-            cleanupServiceField.setAccessible(true);
-            cleanupServiceField.set(sessionManager, cleanupExecutor);
+            injectCleanupExecutor(sessionManager, cleanupExecutor);
 
-            LOG.info("Successfully initialized operation and cleanup executors via reflection");
+            LOG.info("Successfully initialized operation and cleanup executors");
+        } catch (NoSuchFieldException e) {
+            LOG.error(
+                "Failed to inject executors: field not found. " +
+                "This likely means you're using an incompatible Flink version. " +
+                "This code is tested with Flink 1.20.0. Field: {}",
+                e.getMessage()
+            );
+            throw new RuntimeException(
+                "Incompatible Flink version - executor injection failed. " +
+                "Expected Flink 1.20.0, but fields don't match. " +
+                "Please check compatibility or update the code.",
+                e
+            );
+        } catch (IllegalAccessException e) {
+            LOG.error("Failed to access private field for executor injection: {}", e.getMessage(), e);
+            throw new RuntimeException("Security policy prevented executor injection", e);
         } catch (Exception e) {
-            LOG.error("Failed to set executors via reflection: {}", e.getMessage(), e);
+            LOG.error("Unexpected error during executor injection: {}", e.getMessage(), e);
             throw new RuntimeException("Failed to initialize SQL Gateway executors", e);
         }
 
@@ -171,8 +210,7 @@ public class MiniClusterRunner {
 
         if (operationExecutor != null) {
             try {
-                operationExecutor.shutdownNow();
-                LOG.info("Operation executor stopped");
+                shutdownExecutorGracefully(operationExecutor, "Operation executor", 10);
             } catch (Exception e) {
                 LOG.error("Error stopping operation executor", e);
             }
@@ -180,8 +218,7 @@ public class MiniClusterRunner {
 
         if (cleanupExecutor != null) {
             try {
-                cleanupExecutor.shutdownNow();
-                LOG.info("Cleanup executor stopped");
+                shutdownExecutorGracefully(cleanupExecutor, "Cleanup executor", 5);
             } catch (Exception e) {
                 LOG.error("Error stopping cleanup executor", e);
             }
@@ -194,6 +231,140 @@ public class MiniClusterRunner {
             } catch (Exception e) {
                 LOG.error("Error stopping MiniCluster", e);
             }
+        }
+    }
+
+    /**
+     * Gracefully shutdown an executor service with timeout.
+     * First attempts graceful shutdown, then forces shutdown if timeout is exceeded.
+     * This ensures long-running queries are stopped without indefinite waiting.
+     *
+     * @param executor The executor service to shutdown
+     * @param name Name for logging purposes
+     * @param timeoutSeconds Maximum time to wait for graceful shutdown
+     */
+    private void shutdownExecutorGracefully(ExecutorService executor, String name, int timeoutSeconds) {
+        LOG.info("Shutting down {} (timeout: {}s)...", name, timeoutSeconds);
+
+        // Request graceful shutdown (no new tasks accepted, existing tasks continue)
+        executor.shutdown();
+
+        try {
+            // Wait for existing tasks to complete within timeout
+            if (!executor.awaitTermination(timeoutSeconds, TimeUnit.SECONDS)) {
+                LOG.warn("{} did not terminate gracefully within {}s, forcing shutdown of long-running queries",
+                    name, timeoutSeconds);
+
+                // Force shutdown (interrupt running threads)
+                executor.shutdownNow();
+
+                // Wait briefly for forced shutdown to complete
+                if (!executor.awaitTermination(5, TimeUnit.SECONDS)) {
+                    LOG.error("{} did not terminate even after forced shutdown", name);
+                } else {
+                    LOG.info("{} forcefully stopped", name);
+                }
+            } else {
+                LOG.info("{} stopped gracefully", name);
+            }
+        } catch (InterruptedException e) {
+            LOG.warn("{} shutdown interrupted, forcing immediate shutdown", name);
+            executor.shutdownNow();
+            Thread.currentThread().interrupt();
+        }
+    }
+
+    /**
+     * Inject custom operation executor into SessionManagerImpl via reflection.
+     * This is necessary because Flink 1.20.0 doesn't provide a public API for this.
+     *
+     * @throws NoSuchFieldException if the field doesn't exist (incompatible Flink version)
+     * @throws IllegalAccessException if security policy prevents access
+     */
+    private void injectOperationExecutor(SessionManagerImpl sessionManager, ExecutorService executor)
+            throws NoSuchFieldException, IllegalAccessException {
+        java.lang.reflect.Field field = SessionManagerImpl.class.getDeclaredField("operationExecutorService");
+        field.setAccessible(true);
+        field.set(sessionManager, executor);
+        LOG.debug("Injected operation executor into SessionManagerImpl");
+    }
+
+    /**
+     * Inject custom cleanup executor into SessionManagerImpl via reflection.
+     * This is necessary because Flink 1.20.0 doesn't provide a public API for this.
+     *
+     * @throws NoSuchFieldException if the field doesn't exist (incompatible Flink version)
+     * @throws IllegalAccessException if security policy prevents access
+     */
+    private void injectCleanupExecutor(SessionManagerImpl sessionManager, ExecutorService executor)
+            throws NoSuchFieldException, IllegalAccessException {
+        java.lang.reflect.Field field = SessionManagerImpl.class.getDeclaredField("cleanupService");
+        field.setAccessible(true);
+        field.set(sessionManager, executor);
+        LOG.debug("Injected cleanup executor into SessionManagerImpl");
+    }
+
+    /**
+     * Scan the lib directory for user-supplied connector JARs.
+     * Looks in: $FLINK_CONF_DIR/../lib/ (relative to conf directory)
+     *
+     * Users can add connector JARs to this directory to make them available:
+     * - Iceberg: iceberg-flink-runtime-1.20-{version}.jar
+     * - AWS SDK: bundle-{version}.jar
+     * - Kafka: flink-sql-connector-kafka-{version}.jar
+     * - PostgreSQL CDC: flink-sql-connector-postgres-cdc-{version}.jar
+     * etc.
+     *
+     * @return List of URLs for all .jar files found
+     */
+    private List<java.net.URL> scanLibDirectory() {
+        try {
+            // Determine lib directory location
+            // Priority: FLINK_CONNECTOR_LIB_DIR > $FLINK_CONF_DIR/../lib > ./lib
+            String connectorLibDir = System.getenv("FLINK_CONNECTOR_LIB_DIR");
+            String confDirPath = System.getenv("FLINK_CONF_DIR");
+            Path libPath;
+
+            if (connectorLibDir != null && !connectorLibDir.isEmpty()) {
+                // Use custom connector library path if specified
+                libPath = Paths.get(connectorLibDir);
+            } else if (confDirPath != null && !confDirPath.isEmpty()) {
+                // Use default lib/ directory relative to FLINK_CONF_DIR
+                libPath = Paths.get(confDirPath).getParent().resolve("lib");
+            } else {
+                // Fallback to ./lib relative to current directory
+                libPath = Paths.get("lib");
+            }
+
+            LOG.debug("Scanning for connector JARs in: {}", libPath.toAbsolutePath());
+
+            // Check if lib directory exists
+            if (!Files.exists(libPath) || !Files.isDirectory(libPath)) {
+                LOG.debug("Lib directory does not exist: {}", libPath.toAbsolutePath());
+                return Collections.emptyList();
+            }
+
+            // Scan for .jar files
+            try (Stream<Path> files = Files.list(libPath)) {
+                List<java.net.URL> jars = files
+                    .filter(Files::isRegularFile)
+                    .filter(path -> path.toString().toLowerCase().endsWith(".jar"))
+                    .map(path -> {
+                        try {
+                            return path.toUri().toURL();
+                        } catch (java.net.MalformedURLException e) {
+                            LOG.warn("Invalid JAR path: {}", path, e);
+                            return null;
+                        }
+                    })
+                    .filter(url -> url != null)
+                    .collect(Collectors.toList());
+
+                return jars;
+            }
+        } catch (Exception e) {
+            LOG.warn("Error scanning lib directory for connector JARs: {}", e.getMessage());
+            return Collections.emptyList();
         }
     }
 

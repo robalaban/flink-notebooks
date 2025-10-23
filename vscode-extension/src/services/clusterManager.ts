@@ -22,6 +22,12 @@ export interface ClusterConfig {
   taskSlots?: number;
   gatewayPort?: number;
   jarPath?: string;
+  connectorLibraryPath?: string;
+}
+
+export interface Logger {
+  log: (message: string) => void;
+  error: (message: string) => void;
 }
 
 export class ClusterManager {
@@ -29,6 +35,8 @@ export class ClusterManager {
   private status: ClusterStatus = ClusterStatus.STOPPED;
   private pid: number | null = null;
   private config: Required<ClusterConfig>;
+  private crashHandlers: Array<(exitCode: number | null) => void> = [];
+  private logger?: Logger;
 
   constructor(config: ClusterConfig = {}) {
     this.config = {
@@ -38,6 +46,7 @@ export class ClusterManager {
       taskSlots: config.taskSlots || 2,
       gatewayPort: config.gatewayPort || 8083,
       jarPath: config.jarPath || this.findJarPath(),
+      connectorLibraryPath: config.connectorLibraryPath || '',
     };
   }
 
@@ -75,6 +84,41 @@ export class ClusterManager {
     return path.join(flinkRuntimeRoot, 'conf');
   }
 
+  private getConnectorLibDir(): string {
+    // If user specified a custom path, use it
+    if (this.config.connectorLibraryPath) {
+      return path.resolve(this.config.connectorLibraryPath);
+    }
+
+    // Otherwise, use default lib/ directory next to flink-runtime/conf
+    const jarPath = this.config.jarPath;
+    const flinkRuntimeRoot = path.dirname(path.dirname(path.dirname(jarPath)));
+    return path.join(flinkRuntimeRoot, 'lib');
+  }
+
+  private scanConnectorJars(libDir: string): string[] {
+    try {
+      if (!fs.existsSync(libDir) || !fs.statSync(libDir).isDirectory()) {
+        return [];
+      }
+
+      const files = fs.readdirSync(libDir);
+      const jars = files
+        .filter((file) => file.toLowerCase().endsWith('.jar'))
+        .map((file) => path.join(libDir, file));
+
+      if (jars.length > 0 && this.logger) {
+        this.logger.log(`Found ${jars.length} connector JAR(s) in ${libDir}`);
+        jars.forEach((jar) => this.logger!.log(`  - ${path.basename(jar)}`));
+      }
+
+      return jars;
+    } catch (error) {
+      console.error(`Error scanning connector JARs in ${libDir}:`, error);
+      return [];
+    }
+  }
+
   getStatus(): ClusterStatus {
     // Check if process is still alive
     if (this.process && this.process.exitCode !== null) {
@@ -91,6 +135,33 @@ export class ClusterManager {
 
   getGatewayUrl(): string {
     return `http://localhost:${this.config.gatewayPort}`;
+  }
+
+  /**
+   * Set a logger to receive cluster log messages
+   */
+  setLogger(logger: Logger): void {
+    this.logger = logger;
+  }
+
+  /**
+   * Register a callback to be notified when the cluster crashes unexpectedly
+   */
+  onCrash(handler: (exitCode: number | null) => void): void {
+    this.crashHandlers.push(handler);
+  }
+
+  /**
+   * Notify all registered crash handlers
+   */
+  private notifyCrashHandlers(exitCode: number | null): void {
+    for (const handler of this.crashHandlers) {
+      try {
+        handler(exitCode);
+      } catch (error) {
+        console.error('Error in crash handler:', error);
+      }
+    }
   }
 
   async start(memory?: string, parallelism?: number): Promise<void> {
@@ -122,10 +193,18 @@ export class ClusterManager {
     const memoryArg = memory || this.config.jvmMemory;
     const parallelismArg = parallelism || this.config.parallelism;
 
+    // Get connector library directory and scan for JARs
+    const connectorLibDir = this.getConnectorLibDir();
+    const connectorJars = this.scanConnectorJars(connectorLibDir);
+
+    // Build classpath: main JAR + connector JARs
+    const classpath = [this.config.jarPath, ...connectorJars].join(path.delimiter);
+
     const args = [
       `-Xmx${memoryArg}`,
-      '-jar',
-      this.config.jarPath,
+      '-cp',
+      classpath,
+      'com.flink.notebooks.MiniClusterRunner',
       '--parallelism',
       String(parallelismArg),
       '--taskslots',
@@ -134,13 +213,23 @@ export class ClusterManager {
       String(this.config.gatewayPort),
     ];
 
-    const env = {
+    const env: NodeJS.ProcessEnv = {
       ...process.env,
       FLINK_CONF_DIR: flinkConfDir,
     };
 
-    console.log(`Starting MiniCluster: ${this.config.javaPath} ${args.join(' ')}`);
+    // Add FLINK_CONNECTOR_LIB_DIR if a custom path is configured
+    if (this.config.connectorLibraryPath) {
+      env.FLINK_CONNECTOR_LIB_DIR = connectorLibDir;
+    }
+
+    console.log(`Starting MiniCluster: ${this.config.javaPath} -cp <classpath> com.flink.notebooks.MiniClusterRunner ...`);
     console.log(`FLINK_CONF_DIR: ${flinkConfDir}`);
+    console.log(`Connector JARs: ${connectorJars.length} JAR(s) added to classpath`);
+    if (this.logger) {
+      this.logger.log(`Starting MiniCluster with ${connectorJars.length} connector JAR(s) in classpath`);
+      this.logger.log(`Connector library directory: ${connectorLibDir}`);
+    }
 
     try {
       this.process = spawn(this.config.javaPath, args, {
@@ -154,25 +243,62 @@ export class ClusterManager {
       // Capture and log stdout
       if (this.process.stdout) {
         this.process.stdout.on('data', (data) => {
-          console.log(`[MiniCluster] ${data.toString().trim()}`);
+          const message = `[MiniCluster] ${data.toString().trim()}`;
+          console.log(message);
+          if (this.logger) {
+            this.logger.log(message);
+          }
         });
       }
 
       // Capture and log stderr
       if (this.process.stderr) {
         this.process.stderr.on('data', (data) => {
-          console.error(`[MiniCluster] ${data.toString().trim()}`);
+          const message = `[MiniCluster] ${data.toString().trim()}`;
+          console.error(message);
+          if (this.logger) {
+            this.logger.error(message);
+          }
         });
       }
 
       this.process.on('error', (error) => {
-        console.error(`MiniCluster process error: ${error.message}`);
+        const message = `MiniCluster process error: ${error.message}`;
+        console.error(message);
+        if (this.logger) {
+          this.logger.error(message);
+        }
         this.status = ClusterStatus.ERROR;
+        // Notify crash handlers
+        this.notifyCrashHandlers(null);
       });
 
       this.process.on('exit', (code, signal) => {
-        console.log(`MiniCluster process exited with code ${code}, signal ${signal}`);
-        this.status = ClusterStatus.STOPPED;
+        const wasRunning = this.status === ClusterStatus.RUNNING;
+        const wasStopping = this.status === ClusterStatus.STOPPING;
+        const exitMessage = `MiniCluster process exited with code ${code}, signal ${signal}`;
+        console.log(exitMessage);
+        if (this.logger) {
+          this.logger.log(exitMessage);
+        }
+
+        // Detect unexpected crash (not during normal stop/start)
+        // Crash if: was running AND (non-zero exit OR killed by signal)
+        const wasUnexpected = wasRunning && !wasStopping && (code !== 0 || signal !== null);
+
+        if (wasUnexpected) {
+          const crashMessage = `MiniCluster crashed unexpectedly with exit code ${code}, signal ${signal}`;
+          console.error(crashMessage);
+          if (this.logger) {
+            this.logger.error(crashMessage);
+          }
+          this.status = ClusterStatus.ERROR;
+          // Notify crash handlers of unexpected crash
+          this.notifyCrashHandlers(code);
+        } else {
+          this.status = ClusterStatus.STOPPED;
+        }
+
         this.process = null;
         this.pid = null;
       });
@@ -265,9 +391,22 @@ export class ClusterManager {
       await new Promise((resolve) => setTimeout(resolve, 1000));
     }
 
+    // Gateway failed to start - kill the process to prevent orphan
+    console.error(
+      `SQL Gateway did not become ready within ${timeout / 1000} seconds. ` +
+      `Killing process (PID: ${this.pid}) to prevent orphan.`
+    );
+
+    try {
+      await this.stop();
+    } catch (stopError) {
+      console.error('Error killing process after startup timeout:', stopError);
+    }
+
     throw new Error(
       `SQL Gateway did not become ready within ${timeout / 1000} seconds. ` +
-      `Process is still running (PID: ${this.pid}). Check console logs for details.`
+      `The Java process has been terminated. Check console logs for details. ` +
+      `Common causes: port conflicts (8081, 8083, 6123), insufficient memory, or missing Java dependencies.`
     );
   }
 }
