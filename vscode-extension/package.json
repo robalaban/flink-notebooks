@@ -2,8 +2,13 @@
   "name": "flink-notebooks",
   "displayName": "Flink Notebooks",
   "description": "Jupyter-like notebooks for Apache Flink SQL",
-  "version": "0.1.0",
+  "version": "0.1.2",
   "publisher": "flink-notebooks",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/your-username/flink-notebooks"
+  },
   "engines": {
     "vscode": "^1.85.0"
   },
@@ -19,9 +24,7 @@
     "data"
   ],
   "activationEvents": [
-    "onNotebook:flink-notebook",
-    "onView:flinkCatalog",
-    "onView:flinkJobs"
+    "onStartupFinished"
   ],
   "main": "./out/extension.js",
   "contributes": {
@@ -60,6 +63,12 @@
         "command": "flink-notebooks.stopCluster",
         "title": "Flink: Stop Local Cluster",
         "category": "Flink"
+      },
+      {
+        "command": "flink-notebooks.restartCluster",
+        "title": "Flink: Restart Local Cluster",
+        "category": "Flink",
+        "icon": "$(debug-restart)"
       },
       {
         "command": "flink-notebooks.refreshCatalog",
@@ -121,6 +130,24 @@
         "title": "Flink: Clear All Outputs",
         "category": "Flink",
         "icon": "$(clear-all)"
+      },
+      {
+        "command": "flink-notebooks.createUdf",
+        "title": "Flink: Create UDF",
+        "category": "Flink",
+        "icon": "$(add)"
+      },
+      {
+        "command": "flink-notebooks.buildUdfs",
+        "title": "Flink: Build UDFs",
+        "category": "Flink",
+        "icon": "$(tools)"
+      },
+      {
+        "command": "flink-notebooks.registerUdfs",
+        "title": "Flink: Register UDFs",
+        "category": "Flink",
+        "icon": "$(check)"
       }
     ],
     "views": {
@@ -288,6 +315,16 @@
           "type": "string",
           "default": "",
           "description": "Path to directory containing connector JARs (Iceberg, Kafka, AWS, etc.). If empty, uses default lib/ directory in flink-runtime. See CONNECTORS.md for details."
+        },
+        "flink-notebooks.udfAutoRegister": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically register UDFs when creating a new session"
+        },
+        "flink-notebooks.udfAutoBuild": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically build UDFs when Java files are saved"
         }
       }
     }

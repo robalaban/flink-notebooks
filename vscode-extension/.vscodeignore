@@ -1,10 +1,43 @@
+# Development files
 .vscode/**
 .vscode-test/**
 src/**
 .gitignore
 .eslintrc.json
 tsconfig.json
+tsconfig.renderer.json
 **/*.map
 **/*.ts
+
+# Build artifacts from TypeScript
 !out/**/*.js
-node_modules/**
+
+# Exclude dev dependencies but keep production dependencies
+node_modules/@types/**
+node_modules/@typescript-eslint/**
+node_modules/eslint/**
+node_modules/typescript/**
+node_modules/@vscode/vsce/**
+
+# Keep compiled JavaScript and resources
+!out/**
+!resources/**
+
+# Exclude flink-runtime development files but keep necessary files
+flink-runtime/.gradle/**
+flink-runtime/build/**
+!flink-runtime/build/libs/flink-minicluster.jar
+flink-runtime/udfs/build/**
+flink-runtime/.DS_Store
+flink-runtime/**/.DS_Store
+
+# Keep these flink-runtime files for UDF building
+!flink-runtime/gradlew
+!flink-runtime/gradlew.bat
+!flink-runtime/gradle/**
+!flink-runtime/build.gradle
+!flink-runtime/settings.gradle
+!flink-runtime/gradle.properties
+!flink-runtime/conf/**
+!flink-runtime/lib/**
+!flink-runtime/udfs/**

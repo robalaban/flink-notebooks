@@ -1,1 +1,3 @@
 rootProject.name = 'flink-minicluster-runtime'
+
+include 'udfs'

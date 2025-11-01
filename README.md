@@ -2,9 +2,9 @@
 
 ⚠️ Disclaimer: Alpha Software - expect breaking changes and bugs.
 
-This work is heavily influenced by the amazing talk by [Ryan van Huuksloot](https://www.linkedin.com/in/ryanvanhuuksloot/) at Flink Forward 2025 ( Democratizing Flink SQL ) - I will link the talk as soon as I hear that it went live. 
+This work is heavily influenced by the amazing talk by [Ryan van Huuksloot](https://www.linkedin.com/in/ryanvanhuuksloot/) at Flink Forward 2025 ( Democratizing Flink SQL ) - I will link the talk as soon as I hear that it went live.
 
-A VSCode extension providing a Jupyter-like experience for authoring and running Flink SQL queries. 
+A VSCode extension providing a Jupyter-like experience for authoring and running Flink SQL queries.
 
 ![Screenshot of Flink Notebooks extension running in VSCode](docs/img/flink-notebook-extension.png)
 
@@ -15,6 +15,8 @@ A VSCode extension providing a Jupyter-like experience for authoring and running
 - **Streaming Results**: Watch query results stream into cells in real-time
 - **AWS Glue Catalog**: Browse databases and tables, insert references with one click
 - **Local Development**: Everything runs on your machine - no cloud resources needed
+- **UDF Support**: Allows side-loading UDFs written in Java
+- **Custom JAR**: Allows side-loading external JARs
 
 
 ## Requirements
@@ -26,7 +28,7 @@ A VSCode extension providing a Jupyter-like experience for authoring and running
 
 ## Quick Start
 
-If using Nix and direnv: 
+If using Nix and direnv:
 
 Run `direnv allow` it will install all required dependencies.
 
@@ -102,9 +104,6 @@ See [SETUP.md#troubleshooting](SETUP.md#troubleshooting) for common issues and s
 - Remote cluster support (connect to existing Flink)
 - Additional catalogs (Hive, custom)
 - Query history and saved queries
-- Export results (CSV, Parquet, JSON)
-- UDF support
-- Sideloading JARs 
 
 
 ## Acknowledgments

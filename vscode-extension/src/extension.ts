@@ -7,6 +7,7 @@ import { ClusterManager, ClusterStatus } from './services/clusterManager';
 import { SqlGatewayClient } from './services/sqlGatewayClient';
 import { CatalogService } from './services/catalogService';
 import { FlinkJobClient } from './services/flinkJobClient';
+import { UdfManager } from './services/udfManager';
 import {
   FlinkNotebookController,
   SessionManager,
@@ -23,6 +24,7 @@ let sessionManager: SessionManager;
 let notebookController: FlinkNotebookController;
 let catalogTreeProvider: CatalogTreeProvider;
 let jobMonitorProvider: JobMonitorProvider;
+let udfManager: UdfManager;
 let statusBarItem: vscode.StatusBarItem;
 let outputChannel: vscode.OutputChannel;
 
@@ -75,6 +77,43 @@ export async function activate(context: vscode.ExtensionContext) {
     gatewayClient,
     () => sessionManager.getOrCreateSession()
   );
+
+  // Initialize UDF manager
+  udfManager = new UdfManager();
+  udfManager.setLogger({
+    log: (message: string) => outputChannel.appendLine(message),
+    error: (message: string) => outputChannel.appendLine(`[ERROR] ${message}`),
+  });
+
+  // Scan for existing UDFs (gracefully handle if no workspace)
+  try {
+    await udfManager.scanUdfs();
+  } catch (error) {
+    // Ignore errors during scan - UDFs are optional
+    console.log('UDF scan skipped:', error);
+  }
+
+  // Set up auto-registration of UDFs when session is created
+  const udfConfig = vscode.workspace.getConfiguration('flink-notebooks');
+  const udfAutoRegister = udfConfig.get<boolean>('udfAutoRegister', true);
+
+  if (udfAutoRegister) {
+    sessionManager.setOnSessionCreated(async (sessionHandle) => {
+      outputChannel.appendLine('Auto-registering UDFs in new session...');
+      try {
+        await udfManager.registerAllUdfs(gatewayClient, sessionHandle);
+        const udfs = udfManager.getRegisteredUdfs();
+        const registeredCount = udfs.filter((u) => u.registered).length;
+        if (registeredCount > 0) {
+          outputChannel.appendLine(`Auto-registered ${registeredCount} UDF(s) successfully`);
+        }
+      } catch (error) {
+        outputChannel.appendLine(
+          `[ERROR] Failed to auto-register UDFs: ${error instanceof Error ? error.message : String(error)}`
+        );
+      }
+    });
+  }
 
   // Register notebook serializer
   context.subscriptions.push(
@@ -221,6 +260,13 @@ function registerCommands(context: vscode.ExtensionContext) {
   context.subscriptions.push(
     vscode.commands.registerCommand('flink-notebooks.stopCluster', async () => {
       await stopCluster();
+    })
+  );
+
+  // Restart cluster command
+  context.subscriptions.push(
+    vscode.commands.registerCommand('flink-notebooks.restartCluster', async () => {
+      await restartCluster();
     })
   );
 
@@ -465,6 +511,157 @@ function registerCommands(context: vscode.ExtensionContext) {
       }
     })
   );
+
+  // UDF Commands
+
+  // Create UDF
+  context.subscriptions.push(
+    vscode.commands.registerCommand('flink-notebooks.createUdf', async () => {
+      try {
+        // Ask for UDF type
+        const udfType = await vscode.window.showQuickPick(
+          [
+            { label: 'Scalar Function', value: 'scalar', description: 'Map input values to a single output value' },
+            { label: 'Table Function', value: 'table', description: 'Map input values to multiple rows' },
+            { label: 'Aggregate Function', value: 'aggregate', description: 'Aggregate multiple rows into a single value' },
+          ],
+          { placeHolder: 'Select UDF type' }
+        );
+
+        if (!udfType) {
+          return;
+        }
+
+        // Ask for class name
+        const className = await vscode.window.showInputBox({
+          prompt: 'Enter UDF class name (e.g., MyUpperCase)',
+          placeHolder: 'MyUpperCase',
+          validateInput: (value) => {
+            if (!value) {
+              return 'Class name is required';
+            }
+            if (!/^[A-Z][a-zA-Z0-9]*$/.test(value)) {
+              return 'Class name must start with uppercase letter and contain only alphanumeric characters';
+            }
+            return null;
+          },
+        });
+
+        if (!className) {
+          return;
+        }
+
+        // Ask for function name (SQL identifier)
+        const functionName = await vscode.window.showInputBox({
+          prompt: 'Enter function name for SQL (e.g., my_upper)',
+          placeHolder: 'my_upper',
+          value: className.replace(/([A-Z])/g, '_$1').toLowerCase().substring(1),
+          validateInput: (value) => {
+            if (!value) {
+              return 'Function name is required';
+            }
+            if (!/^[a-z][a-z0-9_]*$/.test(value)) {
+              return 'Function name must start with lowercase letter and contain only lowercase letters, numbers, and underscores';
+            }
+            return null;
+          },
+        });
+
+        if (!functionName) {
+          return;
+        }
+
+        // Ask for description (optional)
+        const description = await vscode.window.showInputBox({
+          prompt: 'Enter function description (optional)',
+          placeHolder: 'Converts string to uppercase',
+        });
+
+        // Create UDF file
+        const filePath = await udfManager.createUdf(
+          className,
+          functionName,
+          udfType.value as any,
+          description || undefined
+        );
+
+        vscode.window.showInformationMessage(`Created UDF ${className} at ${filePath}`);
+
+        // Open the file
+        const document = await vscode.workspace.openTextDocument(filePath);
+        await vscode.window.showTextDocument(document);
+
+        // Ask if user wants to build now
+        const buildNow = await vscode.window.showInformationMessage(
+          'Would you like to build the UDFs now?',
+          'Build',
+          'Later'
+        );
+
+        if (buildNow === 'Build') {
+          await vscode.commands.executeCommand('flink-notebooks.buildUdfs');
+        }
+      } catch (error) {
+        vscode.window.showErrorMessage(
+          `Failed to create UDF: ${error instanceof Error ? error.message : String(error)}`
+        );
+      }
+    })
+  );
+
+  // Build UDFs
+  context.subscriptions.push(
+    vscode.commands.registerCommand('flink-notebooks.buildUdfs', async () => {
+      try {
+        vscode.window.showInformationMessage('Building UDFs...');
+        await udfManager.buildUdfs();
+
+        // Check if cluster is running
+        const clusterStatus = clusterManager.getStatus();
+        const isRunning = clusterStatus === 'running';
+
+        // Offer to restart cluster if it's running
+        if (isRunning) {
+          const action = await vscode.window.showInformationMessage(
+            'UDFs built successfully! Restart cluster to load the new UDFs.',
+            'Restart Cluster',
+            'Later'
+          );
+
+          if (action === 'Restart Cluster') {
+            await vscode.commands.executeCommand('flink-notebooks.restartCluster');
+          }
+        } else {
+          vscode.window.showInformationMessage(
+            'UDFs built successfully! Start the cluster to load them.'
+          );
+        }
+      } catch (error) {
+        vscode.window.showErrorMessage(
+          `Failed to build UDFs: ${error instanceof Error ? error.message : String(error)}`
+        );
+      }
+    })
+  );
+
+  // Register UDFs
+  context.subscriptions.push(
+    vscode.commands.registerCommand('flink-notebooks.registerUdfs', async () => {
+      try {
+        const sessionHandle = await sessionManager.getOrCreateSession();
+        vscode.window.showInformationMessage('Registering UDFs...');
+        await udfManager.registerAllUdfs(gatewayClient, sessionHandle);
+        const udfs = udfManager.getRegisteredUdfs();
+        vscode.window.showInformationMessage(
+          `Registered ${udfs.filter((u) => u.registered).length} UDF(s) successfully!`
+        );
+      } catch (error) {
+        vscode.window.showErrorMessage(
+          `Failed to register UDFs: ${error instanceof Error ? error.message : String(error)}`
+        );
+      }
+    })
+  );
 }
 
 async function startCluster(): Promise<void> {
@@ -541,6 +738,27 @@ async function stopCluster(): Promise<void> {
     if (catalogTreeProvider) {
       catalogTreeProvider.refresh();
     }
+  }
+}
+
+async function restartCluster(): Promise<void> {
+  try {
+    vscode.window.showInformationMessage('Restarting Flink cluster...');
+
+    // Stop the cluster
+    await stopCluster();
+
+    // Wait a moment for cleanup
+    await new Promise(resolve => setTimeout(resolve, 1000));
+
+    // Start the cluster
+    await startCluster();
+
+    vscode.window.showInformationMessage('Flink cluster restarted successfully');
+  } catch (error) {
+    vscode.window.showErrorMessage(
+      `Failed to restart cluster: ${error instanceof Error ? error.message : String(error)}`
+    );
   }
 }
 

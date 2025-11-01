@@ -61,20 +61,20 @@ interface TableState {
 // Get Flink type display name
 function getTypeDisplayName(type: string): string {
   const typeMap: Record<string, string> = {
-    'VARCHAR': 'STRING',
-    'CHAR': 'STRING',
-    'INTEGER': 'INT',
-    'BIGINT': 'LONG',
-    'DOUBLE': 'DOUBLE',
-    'FLOAT': 'FLOAT',
-    'DECIMAL': 'DECIMAL',
-    'BOOLEAN': 'BOOL',
-    'TIMESTAMP': 'TIMESTAMP',
-    'TIMESTAMP_LTZ': 'TIMESTAMP',
-    'DATE': 'DATE',
-    'TIME': 'TIME',
-    'BINARY': 'BINARY',
-    'VARBINARY': 'BINARY',
+    VARCHAR: "STRING",
+    CHAR: "STRING",
+    INTEGER: "INT",
+    BIGINT: "LONG",
+    DOUBLE: "DOUBLE",
+    FLOAT: "FLOAT",
+    DECIMAL: "DECIMAL",
+    BOOLEAN: "BOOL",
+    TIMESTAMP: "TIMESTAMP",
+    TIMESTAMP_LTZ: "TIMESTAMP",
+    DATE: "DATE",
+    TIME: "TIME",
+    BINARY: "BINARY",
+    VARBINARY: "BINARY",
   };
 
   return typeMap[type.toUpperCase()] || type.toUpperCase();
@@ -84,23 +84,35 @@ function getTypeDisplayName(type: string): string {
 function getTypeColor(type: string): string {
   const upperType = type.toUpperCase();
 
-  if (upperType.includes('INT') || upperType.includes('LONG')) {
-    return '#3794ff'; // Blue
+  if (upperType.includes("INT") || upperType.includes("LONG")) {
+    return "#3794ff"; // Blue
   }
-  if (upperType.includes('DECIMAL') || upperType.includes('DOUBLE') || upperType.includes('FLOAT')) {
-    return '#89d185'; // Green
+  if (
+    upperType.includes("DECIMAL") ||
+    upperType.includes("DOUBLE") ||
+    upperType.includes("FLOAT")
+  ) {
+    return "#89d185"; // Green
   }
-  if (upperType.includes('TIMESTAMP') || upperType.includes('DATE') || upperType.includes('TIME')) {
-    return '#b180d7'; // Purple
+  if (
+    upperType.includes("TIMESTAMP") ||
+    upperType.includes("DATE") ||
+    upperType.includes("TIME")
+  ) {
+    return "#b180d7"; // Purple
   }
-  if (upperType.includes('STRING') || upperType.includes('CHAR') || upperType.includes('VARCHAR')) {
-    return '#f9826c'; // Orange
+  if (
+    upperType.includes("STRING") ||
+    upperType.includes("CHAR") ||
+    upperType.includes("VARCHAR")
+  ) {
+    return "#f9826c"; // Orange
   }
-  if (upperType.includes('BOOL')) {
-    return '#cca700'; // Yellow
+  if (upperType.includes("BOOL")) {
+    return "#cca700"; // Yellow
   }
 
-  return '#8c8c8c'; // Gray for others
+  return "#8c8c8c"; // Gray for others
 }
 
 // Format cell value for display
@@ -109,11 +121,11 @@ function formatCellValue(value: any): string {
     return '<span class="null-value">NULL</span>';
   }
 
-  if (typeof value === 'string') {
+  if (typeof value === "string") {
     return escapeHtml(value);
   }
 
-  if (typeof value === 'object') {
+  if (typeof value === "object") {
     return escapeHtml(JSON.stringify(value));
   }
 
@@ -122,18 +134,17 @@ function formatCellValue(value: any): string {
 
 // Escape HTML to prevent XSS
 function escapeHtml(text: string): string {
-  const div = document.createElement('div');
+  const div = document.createElement("div");
   div.textContent = text;
   return div.innerHTML;
 }
-
 
 // Render the interactive table
 function renderTable(
   container: HTMLElement,
   data: FlinkTableData,
   state: TableState,
-  updateState: (newState: Partial<TableState>) => void
+  updateState: (newState: Partial<TableState>) => void,
 ): void {
   const { rows, columns } = data;
 
@@ -143,7 +154,7 @@ function renderTable(
   }
 
   // Get column names
-  const columnNames = columns?.map(c => c.name) || Object.keys(rows[0]);
+  const columnNames = columns?.map((c) => c.name) || Object.keys(rows[0]);
 
   // Pagination
   const totalRows = rows.length;
@@ -159,7 +170,7 @@ function renderTable(
       <div class="table-toolbar">
         <div class="toolbar-left">
           <span class="row-count">
-            ${totalRows.toLocaleString()} row${totalRows !== 1 ? 's' : ''}
+            ${totalRows.toLocaleString()} row${totalRows !== 1 ? "s" : ""}
           </span>
         </div>
         <div class="toolbar-right">
@@ -174,56 +185,70 @@ function renderTable(
         <table class="flink-table">
           <thead>
             <tr>
-              ${columnNames.map(colName => {
-                const column = columns?.find(c => c.name === colName);
-                const type = column?.logicalType?.type || '';
-                const displayType = getTypeDisplayName(type);
-                const typeColor = getTypeColor(type);
+              ${columnNames
+                .map((colName) => {
+                  const column = columns?.find((c) => c.name === colName);
+                  const type = column?.logicalType?.type || "";
+                  const displayType = getTypeDisplayName(type);
+                  const typeColor = getTypeColor(type);
 
-                return `
+                  return `
                   <th>
                     <div class="th-content">
                       <span class="column-name">${escapeHtml(colName)}</span>
-                      ${type ? `<span class="type-badge" style="background-color: ${typeColor}">${displayType}</span>` : ''}
+                      ${type ? `<span class="type-badge" style="background-color: ${typeColor}">${displayType}</span>` : ""}
                     </div>
                   </th>
                 `;
-              }).join('')}
+                })
+                .join("")}
             </tr>
           </thead>
           <tbody>
-            ${pageRows.map((row, idx) => `
-              <tr class="${idx % 2 === 0 ? 'even' : 'odd'}">
-                ${columnNames.map(colName => `
+            ${pageRows
+              .map(
+                (row, idx) => `
+              <tr class="${idx % 2 === 0 ? "even" : "odd"}">
+                ${columnNames
+                  .map(
+                    (colName) => `
                   <td>${formatCellValue(row[colName])}</td>
-                `).join('')}
+                `,
+                  )
+                  .join("")}
               </tr>
-            `).join('')}
+            `,
+              )
+              .join("")}
           </tbody>
         </table>
       </div>
 
       <!-- Pagination -->
-      ${totalPages > 1 ? `
+      ${
+        totalPages > 1
+          ? `
         <div class="pagination">
-          <button class="page-btn" data-action="first" ${state.currentPage === 0 ? 'disabled' : ''}>
+          <button class="page-btn" data-action="first" ${state.currentPage === 0 ? "disabled" : ""}>
             ⏮ First
           </button>
-          <button class="page-btn" data-action="prev" ${state.currentPage === 0 ? 'disabled' : ''}>
+          <button class="page-btn" data-action="prev" ${state.currentPage === 0 ? "disabled" : ""}>
             ← Previous
           </button>
           <span class="page-info">
             Page ${state.currentPage + 1} of ${totalPages}
             (showing ${startIdx + 1}-${endIdx} of ${totalRows.toLocaleString()})
           </span>
-          <button class="page-btn" data-action="next" ${state.currentPage >= totalPages - 1 ? 'disabled' : ''}>
+          <button class="page-btn" data-action="next" ${state.currentPage >= totalPages - 1 ? "disabled" : ""}>
             Next →
           </button>
-          <button class="page-btn" data-action="last" ${state.currentPage >= totalPages - 1 ? 'disabled' : ''}>
+          <button class="page-btn" data-action="last" ${state.currentPage >= totalPages - 1 ? "disabled" : ""}>
             Last ⏭
           </button>
         </div>
-      ` : ''}
+      `
+          : ""
+      }
     </div>
   `;
 
@@ -238,28 +263,27 @@ function attachEventListeners(
   container: HTMLElement,
   data: FlinkTableData,
   state: TableState,
-  updateState: (newState: Partial<TableState>) => void
+  updateState: (newState: Partial<TableState>) => void,
 ): void {
-
   // Pagination buttons
-  const pageButtons = container.querySelectorAll('.page-btn[data-action]');
-  pageButtons.forEach(button => {
-    button.addEventListener('click', () => {
-      const action = button.getAttribute('data-action');
+  const pageButtons = container.querySelectorAll(".page-btn[data-action]");
+  pageButtons.forEach((button) => {
+    button.addEventListener("click", () => {
+      const action = button.getAttribute("data-action");
       const totalPages = Math.ceil(data.rows.length / state.rowsPerPage);
 
       let newPage = state.currentPage;
       switch (action) {
-        case 'first':
+        case "first":
           newPage = 0;
           break;
-        case 'prev':
+        case "prev":
           newPage = Math.max(0, state.currentPage - 1);
           break;
-        case 'next':
+        case "next":
           newPage = Math.min(totalPages - 1, state.currentPage + 1);
           break;
-        case 'last':
+        case "last":
           newPage = totalPages - 1;
           break;
       }
@@ -269,9 +293,9 @@ function attachEventListeners(
   });
 
   // Copy button
-  const copyButton = container.querySelector('.copy-button');
+  const copyButton = container.querySelector(".copy-button");
   if (copyButton) {
-    copyButton.addEventListener('click', () => {
+    copyButton.addEventListener("click", () => {
       copyTableToClipboard(data.rows, data.columns);
     });
   }
@@ -279,43 +303,46 @@ function attachEventListeners(
 
 // Copy table data to clipboard as TSV
 function copyTableToClipboard(rows: any[], columns?: ColumnInfo[]): void {
-  const columnNames = columns?.map(c => c.name) || Object.keys(rows[0] || {});
+  const columnNames = columns?.map((c) => c.name) || Object.keys(rows[0] || {});
 
   // Header row
-  const lines = [columnNames.join('\t')];
+  const lines = [columnNames.join("\t")];
 
   // Data rows
-  rows.forEach(row => {
-    const values = columnNames.map(col => {
+  rows.forEach((row) => {
+    const values = columnNames.map((col) => {
       const value = row[col];
-      if (value === null || value === undefined) return 'NULL';
+      if (value === null || value === undefined) return "NULL";
       return String(value);
     });
-    lines.push(values.join('\t'));
+    lines.push(values.join("\t"));
   });
 
-  const text = lines.join('\n');
-  navigator.clipboard.writeText(text).then(() => {
-    // Show feedback (could enhance with a toast notification)
-    const button = document.querySelector('.copy-button');
-    if (button) {
-      const originalText = button.innerHTML;
-      button.innerHTML = '<span class="icon">✓</span> Copied!';
-      setTimeout(() => {
-        button.innerHTML = originalText;
-      }, 2000);
-    }
-  }).catch(err => {
-    console.error('Failed to copy:', err);
-  });
+  const text = lines.join("\n");
+  navigator.clipboard
+    .writeText(text)
+    .then(() => {
+      // Show feedback (could enhance with a toast notification)
+      const button = document.querySelector(".copy-button");
+      if (button) {
+        const originalText = button.innerHTML;
+        button.innerHTML = '<span class="icon">✓</span> Copied!';
+        setTimeout(() => {
+          button.innerHTML = originalText;
+        }, 2000);
+      }
+    })
+    .catch((err) => {
+      console.error("Failed to copy:", err);
+    });
 }
 
 // Inject CSS styles
 function injectStyles(): void {
-  if (document.getElementById('flink-table-styles')) return;
+  if (document.getElementById("flink-table-styles")) return;
 
-  const style = document.createElement('style');
-  style.id = 'flink-table-styles';
+  const style = document.createElement("style");
+  style.id = "flink-table-styles";
   style.textContent = `
     .flink-table-container {
       font-family: var(--vscode-font-family);
@@ -496,7 +523,7 @@ const activateRenderer: ActivationFunction = (context: RendererContext) => {
         // Initialize or restore state
         let state: TableState = context.getState() || {
           currentPage: 0,
-          rowsPerPage: 50
+          rowsPerPage: 50,
         };
 
         // State update function
@@ -508,7 +535,6 @@ const activateRenderer: ActivationFunction = (context: RendererContext) => {
 
         // Initial render
         renderTable(element, data, state, updateState);
-
       } catch (error) {
         element.innerHTML = `
           <div style="color: var(--vscode-errorForeground); padding: 12px;">
@@ -516,7 +542,7 @@ const activateRenderer: ActivationFunction = (context: RendererContext) => {
           </div>
         `;
       }
-    }
+    },
   };
 };
 
@@ -525,6 +551,6 @@ const activateRenderer: ActivationFunction = (context: RendererContext) => {
 export { activateRenderer as activate };
 
 // Also expose on globalThis as a fallback for direct script loading
-if (typeof globalThis !== 'undefined') {
+if (typeof globalThis !== "undefined") {
   (globalThis as any).activate = activateRenderer;
 }

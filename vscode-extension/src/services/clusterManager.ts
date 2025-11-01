@@ -63,17 +63,26 @@ export class ClusterManager {
   }
 
   private findJarPath(): string {
-    // Extension is at: vscode-extension/
-    // JAR is at: flink-runtime/build/libs/flink-minicluster.jar
-    const extensionDir = path.join(__dirname, '..', '..'); // From out/services/ to vscode-extension/
+    // __dirname is: <extension-root>/out/services
+    // Go up to extension root: out/services -> out -> extension-root
+    const extensionDir = path.join(__dirname, '..', '..');
+
+    // In packaged extension, flink-runtime is at extension root
     const jarPath = path.join(
       extensionDir,
-      '..',
       'flink-runtime',
       'build',
       'libs',
       'flink-minicluster.jar'
     );
+
+    this.logger?.log(`Looking for JAR at: ${jarPath}`);
+
+    if (!fs.existsSync(jarPath)) {
+      this.logger?.error(`JAR not found at: ${jarPath}`);
+      throw new Error(`Flink MiniCluster JAR not found at: ${jarPath}`);
+    }
+
     return path.resolve(jarPath);
   }
 

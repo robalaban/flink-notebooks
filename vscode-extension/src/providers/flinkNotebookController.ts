@@ -931,8 +931,16 @@ export class FlinkNotebookController {
  */
 export class SessionManager {
   private currentSessionId: string | null = null;
+  private onSessionCreatedCallback?: (sessionId: string) => Promise<void>;
 
   constructor(private gatewayClient: SqlGatewayClient) {}
+
+  /**
+   * Set a callback to be invoked when a new session is created
+   */
+  setOnSessionCreated(callback: (sessionId: string) => Promise<void>): void {
+    this.onSessionCreatedCallback = callback;
+  }
 
   async getOrCreateSession(): Promise<string> {
     if (this.currentSessionId) {
@@ -961,6 +969,17 @@ export class SessionManager {
 
     const session = await this.gatewayClient.createSession('notebook-session', properties);
     this.currentSessionId = session.sessionHandle;
+
+    // Call session created callback if registered
+    if (this.onSessionCreatedCallback) {
+      try {
+        await this.onSessionCreatedCallback(this.currentSessionId);
+      } catch (error) {
+        console.error('Error in session created callback:', error);
+        // Don't fail session creation if callback fails
+      }
+    }
+
     return this.currentSessionId;
   }
 
