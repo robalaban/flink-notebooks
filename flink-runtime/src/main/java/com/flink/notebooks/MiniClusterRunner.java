@@ -131,12 +131,12 @@ public class MiniClusterRunner {
             }
         );
 
-        // Scan and log external connector JARs from lib directory
-        // Note: These JARs are already loaded via the system classpath (java -cp)
-        // so we don't need to pass them to DefaultContext.load()
+        // Scan and load external connector JARs from lib directory
+        // These JARs are added to the system classpath via java -cp, but we also need to pass them
+        // to DefaultContext.load() so Flink's UserClassLoader can discover service providers (CatalogFactory, etc.)
         List<java.net.URL> additionalJars = scanLibDirectory();
         if (!additionalJars.isEmpty()) {
-            LOG.info("Found {} connector JAR(s) in lib directory (loaded via system classpath)", additionalJars.size());
+            LOG.info("Found {} connector JAR(s) in lib directory", additionalJars.size());
             for (java.net.URL jar : additionalJars) {
                 LOG.info("  - {}", jar);
             }
@@ -144,9 +144,9 @@ public class MiniClusterRunner {
             LOG.info("No connector JARs found in lib directory (this is normal for minimal setup)");
         }
 
-        // Load DefaultContext with the session configuration (for connecting to MiniCluster)
-        // Pass empty list for JARs since they're already in the system classpath
-        DefaultContext defaultContext = DefaultContext.load(sessionConfig, Collections.emptyList(), true);
+        // Load DefaultContext with the session configuration and connector JARs
+        // The JARs are passed to Flink's UserClassLoader for service discovery (e.g., CatalogFactory)
+        DefaultContext defaultContext = DefaultContext.load(sessionConfig, additionalJars, true);
 
         SessionManagerImpl sessionManager = new SessionManagerImpl(defaultContext);
 
