@@ -168,6 +168,33 @@ export class UdfManager {
   }
 
   /**
+   * All UDF source directories the build should compile from. Always includes
+   * the workspace default; appends user-configured `udfSourceDirs` paths.
+   */
+  private getAllUdfSourceDirs(): string[] {
+    const dirs: string[] = [this.getUdfSourcePath()];
+
+    const config = vscode.workspace.getConfiguration("flink-notebooks");
+    const extra = config.get<string[]>("udfSourceDirs", []);
+
+    for (const dir of extra) {
+      const trimmed = dir.trim();
+      if (!trimmed) continue;
+      if (!path.isAbsolute(trimmed)) {
+        if (this.logger) {
+          this.logger.error(
+            `udfSourceDirs entry must be absolute, skipping: ${trimmed}`,
+          );
+        }
+        continue;
+      }
+      dirs.push(trimmed);
+    }
+
+    return dirs;
+  }
+
+  /**
    * Get UDF source path, initializing if needed
    */
   private getUdfSourcePath(): string {
@@ -275,17 +302,31 @@ export class UdfManager {
 
     return new Promise((resolve, reject) => {
       const flinkRuntimePath = this.getFlinkRuntimePath();
-      const workspaceRoot = this.getWorkspaceRoot();
       const gradlew =
         process.platform === "win32" ? "gradlew.bat" : "./gradlew";
       const gradlewPath = path.join(flinkRuntimePath, gradlew);
 
-      // Pass workspace UDF directory to Gradle
-      const workspaceUdfDir = path.join(workspaceRoot, "udfs");
+      const sourceDirs = this.getAllUdfSourceDirs();
+      const sourceDirsCsv = sourceDirs.join(",");
+      const outputDir = this.getUdfOutputDir();
+
+      // Ensure output dir exists before gradle writes into it.
+      if (!fs.existsSync(outputDir)) {
+        fs.mkdirSync(outputDir, { recursive: true });
+      }
+
+      if (this.logger) {
+        this.logger.log(`UDF source dirs: ${sourceDirsCsv}`);
+        this.logger.log(`UDF output dir: ${outputDir}`);
+      }
 
       const buildProcess = spawn(
         gradlewPath,
-        [":udfs:shadowJar", `-PworkspaceUdfDir=${workspaceUdfDir}`],
+        [
+          ":udfs:shadowJar",
+          `-PudfSourceDirs=${sourceDirsCsv}`,
+          `-PudfOutputDir=${outputDir}`,
+        ],
         {
           cwd: flinkRuntimePath,
           shell: true,
@@ -520,65 +561,61 @@ export class UdfManager {
    * Scan UDF directory and populate registry
    */
   async scanUdfs(): Promise<UdfInfo[]> {
-    // Check if workspace is available
     try {
       this.initializePaths();
     } catch (error) {
-      // No workspace folder - return empty array
       if (this.logger) {
         this.logger.log("No workspace folder - skipping UDF scan");
       }
       return [];
     }
 
-    const udfSourcePath = this.getUdfSourcePath();
-    if (!fs.existsSync(udfSourcePath)) {
-      return [];
-    }
-
-    const javaFiles = fs
-      .readdirSync(udfSourcePath)
-      .filter((file) => file.endsWith(".java"));
-
+    const sourceDirs = this.getAllUdfSourceDirs();
     const udfs: UdfInfo[] = [];
 
-    for (const file of javaFiles) {
-      const filePath = path.join(udfSourcePath, file);
-      const className = file.replace(".java", "");
+    for (const sourceDir of sourceDirs) {
+      if (!fs.existsSync(sourceDir)) continue;
 
-      // Read file to extract function name and type from comments
-      const content = fs.readFileSync(filePath, "utf-8");
+      const javaFiles = fs
+        .readdirSync(sourceDir)
+        .filter((file) => file.endsWith(".java"));
 
-      // Parse CREATE TEMPORARY FUNCTION line to get function name
-      const functionMatch = content.match(
-        /CREATE\s+TEMPORARY\s+FUNCTION\s+(\w+)/i,
-      );
-      const functionName = functionMatch
-        ? functionMatch[1]
-        : className.toLowerCase();
+      for (const file of javaFiles) {
+        const filePath = path.join(sourceDir, file);
+        const className = file.replace(".java", "");
+        const content = fs.readFileSync(filePath, "utf-8");
 
-      // Determine type from extends clause
-      let type: UdfType = "scalar";
-      if (content.includes("extends TableFunction")) {
-        type = "table";
-      } else if (content.includes("extends AggregateFunction")) {
-        type = "aggregate";
+        const functionMatch = content.match(
+          /CREATE\s+TEMPORARY\s+FUNCTION\s+(\w+)/i,
+        );
+        const functionName = functionMatch
+          ? functionMatch[1]
+          : className.toLowerCase();
+
+        let type: UdfType = "scalar";
+        if (content.includes("extends TableFunction")) {
+          type = "table";
+        } else if (content.includes("extends AggregateFunction")) {
+          type = "aggregate";
+        }
+
+        const udfInfo: UdfInfo = {
+          className,
+          functionName,
+          type,
+          filePath,
+          registered: false,
+        };
+
+        udfs.push(udfInfo);
+        this.registeredUdfs.set(functionName, udfInfo);
       }
-
-      const udfInfo: UdfInfo = {
-        className,
-        functionName,
-        type,
-        filePath,
-        registered: false,
-      };
-
-      udfs.push(udfInfo);
-      this.registeredUdfs.set(functionName, udfInfo);
     }
 
     if (this.logger) {
-      this.logger.log(`Scanned ${udfs.length} UDF(s) from ${udfSourcePath}`);
+      this.logger.log(
+        `Scanned ${udfs.length} UDF(s) from ${sourceDirs.length} source dir(s)`,
+      );
     }
 
     return udfs;
