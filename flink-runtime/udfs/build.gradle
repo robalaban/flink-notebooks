@@ -24,7 +24,8 @@ ext {
 
 // Support compiling UDFs from one or more source directories.
 // Pass via: ./gradlew :udfs:shadowJar -PudfSourceDirs=/path/a/src/main/java,/path/b/src/main/java
-//   - Each path must point to a `src/main/java`-style root.
+//   - Each path is used as-is as a Java source root; pass the innermost
+//     directory that contains .java files (e.g. src/main/java).
 //   - Empty/missing paths are logged and skipped.
 def udfSourceDirsProp = project.findProperty('udfSourceDirs') ?: ''
 def udfSourceDirs = udfSourceDirsProp
@@ -42,14 +43,14 @@ sourceSets {
                 def dir = file(dirPath)
                 if (dir.exists()) {
                     srcDir dir
-                    println "Including UDF source dir: ${dir}"
+                    logger.info "Including UDF source dir: ${dir}"
                 } else {
-                    println "UDF source dir not found, skipping: ${dir}"
+                    logger.info "UDF source dir not found, skipping: ${dir}"
                 }
             }
 
             if (udfSourceDirs.isEmpty()) {
-                println "No -PudfSourceDirs specified; building bundled examples only."
+                logger.info "No -PudfSourceDirs specified; building bundled examples only."
             }
         }
     }
@@ -72,7 +73,7 @@ shadowJar {
     // Output to a caller-specified directory (workspace/.flink-udfs by default
     // when invoked from the extension). Falls back to ../lib when unset so
     // that running gradle directly from the CLI still works.
-    def udfOutputDirProp = project.findProperty('udfOutputDir')
+    def udfOutputDirProp = project.findProperty('udfOutputDir')?.trim()
     destinationDirectory = udfOutputDirProp ? file(udfOutputDirProp) : file('../lib')
 
     // Exclude signature files
