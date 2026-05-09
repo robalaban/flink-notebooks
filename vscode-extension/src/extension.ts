@@ -616,24 +616,25 @@ function registerCommands(context: vscode.ExtensionContext) {
         vscode.window.showInformationMessage('Building UDFs...');
         await udfManager.buildUdfs();
 
-        // Check if cluster is running
         const clusterStatus = clusterManager.getStatus();
         const isRunning = clusterStatus === 'running';
 
-        // Offer to restart cluster if it's running
-        if (isRunning) {
-          const action = await vscode.window.showInformationMessage(
-            'UDFs built successfully! Restart cluster to load the new UDFs.',
-            'Restart Cluster',
-            'Later'
-          );
-
-          if (action === 'Restart Cluster') {
-            await vscode.commands.executeCommand('flink-notebooks.restartCluster');
-          }
-        } else {
+        if (!isRunning) {
           vscode.window.showInformationMessage(
-            'UDFs built successfully! Start the cluster to load them.'
+            'UDFs built. Start the cluster to load them.'
+          );
+          return;
+        }
+
+        // Cluster is running: recycle the session so the new jar is picked up.
+        try {
+          await sessionManager.recycleSession();
+          vscode.window.showInformationMessage(
+            'UDFs built. Session recycled - new UDFs loaded.'
+          );
+        } catch (recycleError) {
+          vscode.window.showErrorMessage(
+            `UDFs built, but session recycle failed: ${recycleError instanceof Error ? recycleError.message : String(recycleError)}`
           );
         }
       } catch (error) {
