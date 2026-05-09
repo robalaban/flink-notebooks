@@ -319,12 +319,18 @@
         "flink-notebooks.udfAutoRegister": {
           "type": "boolean",
           "default": true,
-          "description": "Automatically register UDFs when creating a new session"
+          "description": "Automatically register UDFs (ADD JAR + CREATE TEMPORARY FUNCTION) when a new SQL Gateway session is created."
         },
         "flink-notebooks.udfAutoBuild": {
           "type": "boolean",
-          "default": true,
-          "description": "Automatically build UDFs when Java files are saved"
+          "default": false,
+          "description": "Automatically rebuild UDFs and recycle the session when a UDF .java file is saved. Off by default; rebuilds can take several seconds and recycle the active session."
+        },
+        "flink-notebooks.udfSourceDirs": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": [],
+          "description": "Additional absolute paths to UDF source directories (each must contain `src/main/java/...`). The workspace `udfs/` directory is always included. Useful for importing UDFs from external Flink projects without copying files."
         }
       }
     }
