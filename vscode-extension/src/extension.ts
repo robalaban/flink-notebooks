@@ -146,7 +146,11 @@ export async function activate(context: vscode.ExtensionContext) {
         buildInFlight = false;
         if (rebuildPending) {
           rebuildPending = false;
-          triggerBuild();
+          triggerBuild().catch((err) =>
+            outputChannel.appendLine(
+              `[ERROR] Auto-rebuild failed: ${err instanceof Error ? err.message : String(err)}`,
+            ),
+          );
         }
       }
     };
@@ -166,6 +170,13 @@ export async function activate(context: vscode.ExtensionContext) {
       watcher.onDidDelete(onChange);
       context.subscriptions.push(watcher);
     }
+
+    // Ensure any pending debounced build is cancelled on deactivation.
+    context.subscriptions.push({
+      dispose: () => {
+        if (debounceHandle) clearTimeout(debounceHandle);
+      },
+    });
 
     outputChannel.appendLine(
       `UDF auto-rebuild enabled (watching ${patterns.length} pattern(s))`
