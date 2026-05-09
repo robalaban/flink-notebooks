@@ -183,6 +183,22 @@ export class UdfManager {
     return this.flinkRuntimePath!;
   }
 
+  /**
+   * Path where the built UDF jar lives. Used by ADD JAR and by the build output dir.
+   */
+  getUdfJarPath(): string {
+    const workspaceRoot = this.getWorkspaceRoot();
+    return path.join(workspaceRoot, ".flink-udfs", "flink-udfs.jar");
+  }
+
+  /**
+   * Path to the workspace-local output directory the gradle build writes into.
+   */
+  private getUdfOutputDir(): string {
+    const workspaceRoot = this.getWorkspaceRoot();
+    return path.join(workspaceRoot, ".flink-udfs");
+  }
+
   setLogger(logger: Logger): void {
     this.logger = logger;
   }
@@ -392,7 +408,58 @@ export class UdfManager {
   }
 
   /**
-   * Register all tracked UDFs in the session
+   * Issue ADD JAR for the workspace UDF jar so the session classloader picks it up.
+   * Silently skips if the jar doesn't exist yet (user hasn't built).
+   */
+  async addJarToSession(
+    gatewayClient: SqlGatewayClient,
+    sessionHandle: string,
+  ): Promise<void> {
+    const jarPath = this.getUdfJarPath();
+
+    if (!fs.existsSync(jarPath)) {
+      if (this.logger) {
+        this.logger.log(
+          `No UDF jar at ${jarPath} - run "Flink: Build UDFs" to enable UDFs.`,
+        );
+      }
+      return;
+    }
+
+    const sql = `ADD JAR '${jarPath}'`;
+    if (this.logger) {
+      this.logger.log(`Loading UDF jar into session: ${sql}`);
+    }
+
+    const result = await gatewayClient.executeStatement(sessionHandle, sql);
+
+    let status = await gatewayClient.getStatementInfo(
+      sessionHandle,
+      result.operationHandle,
+    );
+    const maxAttempts = 10;
+    let attempts = 0;
+    while (
+      status.status !== "FINISHED" &&
+      status.status !== "ERROR" &&
+      attempts < maxAttempts
+    ) {
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      status = await gatewayClient.getStatementInfo(
+        sessionHandle,
+        result.operationHandle,
+      );
+      attempts++;
+    }
+
+    if (status.status !== "FINISHED") {
+      throw new Error(`ADD JAR failed for ${jarPath} (status=${status.status})`);
+    }
+  }
+
+  /**
+   * Register all tracked UDFs in the session. Loads the jar first via ADD JAR;
+   * if the jar load fails, skip the per-UDF registration loop entirely (they'd all fail).
    */
   async registerAllUdfs(
     gatewayClient: SqlGatewayClient,
@@ -404,6 +471,21 @@ export class UdfManager {
       if (this.logger) {
         this.logger.log("No UDFs to register");
       }
+      // Still try to load the jar in case bundled examples exist.
+    }
+
+    try {
+      await this.addJarToSession(gatewayClient, sessionHandle);
+    } catch (error) {
+      if (this.logger) {
+        this.logger.error(
+          `Failed to ADD JAR; skipping UDF registration: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+      throw error;
+    }
+
+    if (udfs.length === 0) {
       return;
     }
 
@@ -415,7 +497,6 @@ export class UdfManager {
       try {
         await this.registerUdf(gatewayClient, sessionHandle, udf.functionName);
       } catch (error) {
-        // Log error but continue registering other UDFs
         if (this.logger) {
           this.logger.error(
             `Failed to register ${udf.functionName}: ${error instanceof Error ? error.message : String(error)}`,
