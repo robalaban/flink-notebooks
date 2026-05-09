@@ -181,3 +181,6 @@ htmlcov/
 *.tmp
 *.temp
 .cache/
+
+# Workspace-local UDF jar output (built by the extension).
+.flink-udfs/
