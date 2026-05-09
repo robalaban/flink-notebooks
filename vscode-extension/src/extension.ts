@@ -3,6 +3,8 @@
  */
 
 import * as vscode from 'vscode';
+import * as path from 'path';
+import * as fs from 'fs';
 import { ClusterManager, ClusterStatus } from './services/clusterManager';
 import { SqlGatewayClient } from './services/sqlGatewayClient';
 import { CatalogService } from './services/catalogService';
@@ -84,6 +86,23 @@ export async function activate(context: vscode.ExtensionContext) {
     log: (message: string) => outputChannel.appendLine(message),
     error: (message: string) => outputChannel.appendLine(`[ERROR] ${message}`),
   });
+
+  // One-time migration: older versions wrote the UDF jar into flink-runtime/lib/,
+  // which the cluster auto-loaded at startup. Dynamic loading puts it in the
+  // workspace instead, so the lib/ copy is dead weight that confuses inspection.
+  try {
+    const staleJar = path.join(context.extensionPath, 'flink-runtime', 'lib', 'flink-udfs.jar');
+    if (fs.existsSync(staleJar)) {
+      fs.unlinkSync(staleJar);
+      outputChannel.appendLine(
+        `Migrated UDF jar to workspace; removed stale ${staleJar}`
+      );
+    }
+  } catch (migrateError) {
+    outputChannel.appendLine(
+      `[WARN] UDF migration check failed: ${migrateError instanceof Error ? migrateError.message : String(migrateError)}`
+    );
+  }
 
   // Scan for existing UDFs (gracefully handle if no workspace)
   try {
