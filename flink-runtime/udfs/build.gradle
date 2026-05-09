@@ -22,29 +22,34 @@ ext {
     flinkVersion = '1.20.0'
 }
 
-// Support compiling UDFs from workspace directory (user's project)
-// Pass via: ./gradlew shadowJar -PworkspaceUdfDir=/path/to/workspace/udfs
-def workspaceUdfDir = project.findProperty('workspaceUdfDir')
+// Support compiling UDFs from one or more source directories.
+// Pass via: ./gradlew :udfs:shadowJar -PudfSourceDirs=/path/a/src/main/java,/path/b/src/main/java
+//   - Each path must point to a `src/main/java`-style root.
+//   - Empty/missing paths are logged and skipped.
+def udfSourceDirsProp = project.findProperty('udfSourceDirs') ?: ''
+def udfSourceDirs = udfSourceDirsProp
+    .split(',')
+    .collect { it.trim() }
+    .findAll { !it.isEmpty() }
 
 sourceSets {
     main {
         java {
-            // Always include bundled examples (read-only, shipped with extension)
+            // Always include bundled examples (shipped with the extension).
             srcDir 'src/main/java'
 
-            // Include workspace UDFs if directory is specified and exists
-            if (workspaceUdfDir) {
-                def workspaceSourceDir = file("${workspaceUdfDir}/src/main/java")
-                if (workspaceSourceDir.exists()) {
-                    srcDir workspaceSourceDir
-                    println "Including workspace UDFs from: ${workspaceSourceDir}"
+            udfSourceDirs.each { dirPath ->
+                def dir = file(dirPath)
+                if (dir.exists()) {
+                    srcDir dir
+                    println "Including UDF source dir: ${dir}"
                 } else {
-                    println "Workspace UDF directory not found: ${workspaceSourceDir}"
-                    println "Only bundled examples will be compiled."
+                    println "UDF source dir not found, skipping: ${dir}"
                 }
-            } else {
-                println "No workspace UDF directory specified (-PworkspaceUdfDir)"
-                println "Only bundled examples will be compiled."
+            }
+
+            if (udfSourceDirs.isEmpty()) {
+                println "No -PudfSourceDirs specified; building bundled examples only."
             }
         }
     }
@@ -64,8 +69,11 @@ shadowJar {
     archiveClassifier = ''
     archiveVersion = ''
 
-    // Output directly to lib directory
-    destinationDirectory = file('../lib')
+    // Output to a caller-specified directory (workspace/.flink-udfs by default
+    // when invoked from the extension). Falls back to ../lib when unset so
+    // that running gradle directly from the CLI still works.
+    def udfOutputDirProp = project.findProperty('udfOutputDir')
+    destinationDirectory = udfOutputDirProp ? file(udfOutputDirProp) : file('../lib')
 
     // Exclude signature files
     exclude 'META-INF/*.SF'
