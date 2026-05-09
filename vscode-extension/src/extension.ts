@@ -115,6 +115,63 @@ export async function activate(context: vscode.ExtensionContext) {
     });
   }
 
+  // File watcher for auto-rebuild
+  const udfAutoBuild = udfConfig.get<boolean>('udfAutoBuild', false);
+  if (udfAutoBuild) {
+    const patterns: vscode.RelativePattern[] = [];
+    const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+    if (workspaceFolder) {
+      patterns.push(new vscode.RelativePattern(workspaceFolder, 'udfs/src/**/*.java'));
+    }
+    for (const extra of udfConfig.get<string[]>('udfSourceDirs', [])) {
+      const trimmed = extra?.trim();
+      if (trimmed) {
+        patterns.push(new vscode.RelativePattern(vscode.Uri.file(trimmed), '**/*.java'));
+      }
+    }
+
+    let buildInFlight = false;
+    let rebuildPending = false;
+    let debounceHandle: NodeJS.Timeout | undefined;
+
+    const triggerBuild = async () => {
+      if (buildInFlight) {
+        rebuildPending = true;
+        return;
+      }
+      buildInFlight = true;
+      try {
+        await vscode.commands.executeCommand('flink-notebooks.buildUdfs');
+      } finally {
+        buildInFlight = false;
+        if (rebuildPending) {
+          rebuildPending = false;
+          triggerBuild();
+        }
+      }
+    };
+
+    const onChange = () => {
+      if (debounceHandle) clearTimeout(debounceHandle);
+      debounceHandle = setTimeout(() => {
+        debounceHandle = undefined;
+        triggerBuild();
+      }, 1000);
+    };
+
+    for (const pattern of patterns) {
+      const watcher = vscode.workspace.createFileSystemWatcher(pattern);
+      watcher.onDidChange(onChange);
+      watcher.onDidCreate(onChange);
+      watcher.onDidDelete(onChange);
+      context.subscriptions.push(watcher);
+    }
+
+    outputChannel.appendLine(
+      `UDF auto-rebuild enabled (watching ${patterns.length} pattern(s))`
+    );
+  }
+
   // Register notebook serializer
   context.subscriptions.push(
     vscode.workspace.registerNotebookSerializer(
