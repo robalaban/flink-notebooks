@@ -188,10 +188,20 @@ export class UdfManager {
         }
         continue;
       }
+      if (trimmed.includes(",")) {
+        if (this.logger) {
+          this.logger.error(
+            `udfSourceDirs entry contains a comma, which conflicts with the gradle CSV protocol; skipping: ${trimmed}`,
+          );
+        }
+        continue;
+      }
       dirs.push(trimmed);
     }
 
-    return dirs;
+    // Normalize and dedupe so the same physical directory is not scanned twice
+    // (e.g., user adds the workspace default or a trailing-slash variant).
+    return Array.from(new Set(dirs.map((d) => path.resolve(d))));
   }
 
   /**
