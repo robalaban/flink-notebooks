@@ -40,9 +40,11 @@ export class UdfManager {
   private logger?: Logger;
   private udfSourcePath?: string;
   private flinkRuntimePath?: string;
+  private extensionPath?: string;
 
-  constructor() {
-    // Paths are lazily initialized when needed
+  constructor(extensionPath?: string) {
+    // Store extension path for finding bundled build tools
+    this.extensionPath = extensionPath;
   }
 
   /**
@@ -59,9 +61,13 @@ export class UdfManager {
   }
 
   /**
-   * Find the project root by looking for flink-runtime directory
+   * Find the project root by looking for flink-runtime directory.
+   * Supports two modes:
+   * 1. Development mode: flink-runtime exists in workspace (for extension developers)
+   * 2. Installed mode: flink-runtime exists in extension directory (for users)
    */
   private findProjectRoot(startPath: string): string {
+    // First, try to find flink-runtime in workspace (development mode)
     let currentPath = startPath;
     const maxDepth = 5; // Prevent infinite loops
 
@@ -76,6 +82,11 @@ export class UdfManager {
         // Verify it has the gradlew file
         const gradlewPath = path.join(flinkRuntimePath, "gradlew");
         if (fs.existsSync(gradlewPath)) {
+          if (this.logger) {
+            this.logger.log(
+              `Found flink-runtime in workspace (development mode): ${currentPath}`,
+            );
+          }
           return currentPath;
         }
       }
@@ -89,9 +100,32 @@ export class UdfManager {
       currentPath = parentPath;
     }
 
+    // If not found in workspace, check extension directory (installed mode)
+    if (this.extensionPath) {
+      const extensionFlinkRuntime = path.join(
+        this.extensionPath,
+        "flink-runtime",
+      );
+      const gradlewPath = path.join(extensionFlinkRuntime, "gradlew");
+
+      if (fs.existsSync(extensionFlinkRuntime) && fs.existsSync(gradlewPath)) {
+        if (this.logger) {
+          this.logger.log(
+            `Found flink-runtime in extension directory (installed mode): ${this.extensionPath}`,
+          );
+        }
+        return this.extensionPath;
+      }
+    }
+
     throw new Error(
-      `Could not find flink-runtime directory. Please open the Flink Notebooks project root folder.\n` +
-        `Searched from: ${startPath}`,
+      `Could not find flink-runtime directory with Gradle build tools.\n` +
+        `Searched in workspace: ${startPath}\n` +
+        (this.extensionPath
+          ? `Searched in extension: ${this.extensionPath}\n`
+          : "") +
+        `\nThis may indicate the extension was not packaged correctly. ` +
+        `Please report this issue at https://github.com/anthropics/flink-notebooks/issues`,
     );
   }
 
@@ -104,6 +138,12 @@ export class UdfManager {
     }
 
     const workspaceRoot = this.getWorkspaceRoot();
+
+    if (this.logger) {
+      this.logger.log(`Initializing UDF paths...`);
+      this.logger.log(`Workspace root: ${workspaceRoot}`);
+      this.logger.log(`Extension path: ${this.extensionPath || '(not set)'}`);
+    }
 
     // Find the actual project root (handles case where vscode-extension is opened)
     const projectRoot = this.findProjectRoot(workspaceRoot);

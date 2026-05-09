@@ -78,8 +78,8 @@ export async function activate(context: vscode.ExtensionContext) {
     () => sessionManager.getOrCreateSession()
   );
 
-  // Initialize UDF manager
-  udfManager = new UdfManager();
+  // Initialize UDF manager with extension path for finding bundled build tools
+  udfManager = new UdfManager(context.extensionPath);
   udfManager.setLogger({
     log: (message: string) => outputChannel.appendLine(message),
     error: (message: string) => outputChannel.appendLine(`[ERROR] ${message}`),
