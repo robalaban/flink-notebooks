@@ -993,4 +993,23 @@ export class SessionManager {
       this.currentSessionId = null;
     }
   }
+
+  /**
+   * Close the current session and open a new one. Used after rebuilding UDFs:
+   * a fresh session means a fresh classloader, which loads the new UDF classes.
+   * Tolerates "session already gone" during close so a dead session doesn't
+   * block recycling.
+   */
+  async recycleSession(): Promise<string> {
+    if (this.currentSessionId) {
+      try {
+        await this.gatewayClient.closeSession(this.currentSessionId);
+      } catch (error) {
+        // Session may already be gone (cluster restarted, etc.) - proceed.
+        console.log("recycleSession: close failed, proceeding:", error);
+      }
+      this.currentSessionId = null;
+    }
+    return this.getOrCreateSession();
+  }
 }
