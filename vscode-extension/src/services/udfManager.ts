@@ -417,6 +417,14 @@ export class UdfManager {
   ): Promise<void> {
     const jarPath = this.getUdfJarPath();
 
+    // Defensive: a single quote in the path would break the ADD JAR SQL.
+    // In practice workspace paths shouldn't contain quotes, but fail loudly if they do.
+    if (jarPath.includes("'")) {
+      throw new Error(
+        `UDF jar path contains a single quote, which is not supported: ${jarPath}`,
+      );
+    }
+
     if (!fs.existsSync(jarPath)) {
       if (this.logger) {
         this.logger.log(
@@ -437,7 +445,9 @@ export class UdfManager {
       sessionHandle,
       result.operationHandle,
     );
-    const maxAttempts = 10;
+    // Higher than registerUdf's budget because ADD JAR triggers classloader I/O
+    // on a potentially large jar; cold loads on a slow filesystem can take seconds.
+    const maxAttempts = 20;
     let attempts = 0;
     while (
       status.status !== "FINISHED" &&
