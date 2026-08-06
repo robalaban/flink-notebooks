@@ -227,12 +227,12 @@
       "notebook/cell/title": [
         {
           "command": "flink-notebooks.pauseStreaming",
-          "when": "notebookType == flink-notebook && notebookCellType == code && notebookCellExecutionState == executing && !flink-notebooks:streamingPaused",
+          "when": "notebookType == flink-notebook && notebookCellType == code && notebookCellExecutionState == executing",
           "group": "inline@1"
         },
         {
           "command": "flink-notebooks.resumeStreaming",
-          "when": "notebookType == flink-notebook && notebookCellType == code && notebookCellExecutionState == executing && flink-notebooks:streamingPaused",
+          "when": "notebookType == flink-notebook && notebookCellType == code && notebookCellExecutionState == executing",
           "group": "inline@1"
         },
         {
@@ -249,6 +249,16 @@
           "type": "number",
           "default": 8083,
           "description": "Port for the SQL Gateway REST API"
+        },
+        "flink-notebooks.webUiPort": {
+          "type": "number",
+          "default": 8081,
+          "description": "Port for the Flink Web UI and JobManager REST API"
+        },
+        "flink-notebooks.rpcPort": {
+          "type": "number",
+          "default": 6123,
+          "description": "Port for the local MiniCluster JobManager RPC endpoint"
         },
         "flink-notebooks.miniclusterJarPath": {
           "type": "string",
@@ -342,7 +352,7 @@
     "compile:renderer": "tsc -p ./tsconfig.renderer.json",
     "watch": "tsc -watch -p ./",
     "lint": "eslint src --ext ts",
-    "test": "node ./out/test/runTest.js"
+    "test": "npm run compile && node --test tests/*.test.js"
   },
   "devDependencies": {
     "@types/node": "^20.10.0",

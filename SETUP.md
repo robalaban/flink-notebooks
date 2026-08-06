@@ -6,7 +6,7 @@ This guide walks you through setting up Flink Notebooks from scratch.
 
 ### Required Software
 
-1. **Java 11 or later**
+1. **Java 17 or later**
    ```bash
    java -version  # Should show 11+
    ```
@@ -148,6 +148,8 @@ Open Settings (`Cmd+,`) and search for "Flink":
 | Setting | Recommended | Description |
 |---------|-------------|-------------|
 | `gatewayPort` | `8083` | SQL Gateway REST API port |
+| `webUiPort` | `8081` | Flink Web UI / JobManager REST API port |
+| `rpcPort` | `6123` | JobManager RPC port |
 | `jvmMemory` | `1024m` | Increase for larger datasets (`2g`, `4g`) |
 | `autoStartCluster` | `true` | Auto-start on notebook open |
 | `awsProfile` | (your profile) | AWS profile to use |
@@ -160,4 +162,3 @@ Open Settings (`Cmd+,`) and search for "Flink":
 
 - Check [README.md](README.md) for feature overview
 - Open an issue on GitHub for bugs
-

@@ -10,10 +10,8 @@ import { SqlGatewayClient } from './services/sqlGatewayClient';
 import { CatalogService } from './services/catalogService';
 import { FlinkJobClient } from './services/flinkJobClient';
 import { UdfManager } from './services/udfManager';
-import {
-  FlinkNotebookController,
-  SessionManager,
-} from './providers/flinkNotebookController';
+import { SessionManager } from './services/sessionManager';
+import { FlinkNotebookController } from './providers/flinkNotebookController';
 import { FlinkNotebookSerializer } from './providers/flinkNotebookSerializer';
 import { CatalogTreeProvider } from './providers/catalogTreeProvider';
 import { JobMonitorProvider } from './providers/jobMonitorProvider';
@@ -41,6 +39,8 @@ export async function activate(context: vscode.ExtensionContext) {
   // Get configuration
   const config = vscode.workspace.getConfiguration('flink-notebooks');
   const gatewayPort = config.get<number>('gatewayPort', 8083);
+  const webUiPort = config.get<number>('webUiPort', 8081);
+  const rpcPort = config.get<number>('rpcPort', 6123);
   const javaPath = config.get<string>('javaPath');
   const jvmMemory = config.get<string>('jvmMemory');
   const parallelism = config.get<number>('parallelism');
@@ -55,6 +55,8 @@ export async function activate(context: vscode.ExtensionContext) {
     parallelism: parallelism || undefined,
     taskSlots: taskSlots || undefined,
     gatewayPort,
+    webUiPort,
+    rpcPort,
     jarPath: jarPath || undefined,
     connectorLibraryPath: connectorLibraryPath || undefined,
   });
@@ -69,15 +71,20 @@ export async function activate(context: vscode.ExtensionContext) {
   gatewayClient = new SqlGatewayClient(`http://localhost:${gatewayPort}`);
 
   // Initialize Flink Job REST client
-  jobClient = new FlinkJobClient('http://localhost:8081');
+  jobClient = new FlinkJobClient(`http://localhost:${webUiPort}`);
 
   // Initialize session manager
-  sessionManager = new SessionManager(gatewayClient);
+  sessionManager = new SessionManager(gatewayClient, {
+    executionModeProvider: () =>
+      vscode.workspace
+        .getConfiguration('flink-notebooks')
+        .get<string>('executionMode', 'auto'),
+  });
 
   // Initialize catalog service (uses Flink SQL Gateway to query catalogs)
   catalogService = new CatalogService(
     gatewayClient,
-    () => sessionManager.getOrCreateSession()
+    () => sessionManager.getOrCreateSession('catalog')
   );
 
   // Initialize UDF manager with extension path for finding bundled build tools
@@ -287,6 +294,18 @@ export async function activate(context: vscode.ExtensionContext) {
     }
   }
 
+  context.subscriptions.push(
+    vscode.workspace.onDidOpenNotebookDocument((document) => {
+      if (document.notebookType === 'flink-notebook') {
+        maybeStartClusterForNotebook().catch((error) => {
+          outputChannel.appendLine(
+            `[ERROR] Auto-start failed: ${error instanceof Error ? error.message : String(error)}`
+          );
+        });
+      }
+    })
+  );
+
   // Update status bar
   updateStatusBar();
 
@@ -299,7 +318,7 @@ export async function deactivate() {
   // Clean up session
   if (sessionManager) {
     try {
-      await sessionManager.closeSession();
+      await sessionManager.closeAllSessions();
       console.log('Session closed successfully');
     } catch (error) {
       console.error('Error closing session:', error);
@@ -333,6 +352,7 @@ function registerCommands(context: vscode.ExtensionContext) {
       });
 
       await vscode.window.showNotebookDocument(document);
+      await maybeStartClusterForNotebook();
     })
   );
 
@@ -715,7 +735,7 @@ function registerCommands(context: vscode.ExtensionContext) {
 
         // Cluster is running: recycle the session so the new jar is picked up.
         try {
-          await sessionManager.recycleSession();
+          await sessionManager.recycleAllSessions();
           vscode.window.showInformationMessage(
             'UDFs built. Session recycled - new UDFs loaded.'
           );
@@ -736,7 +756,7 @@ function registerCommands(context: vscode.ExtensionContext) {
   context.subscriptions.push(
     vscode.commands.registerCommand('flink-notebooks.registerUdfs', async () => {
       try {
-        const sessionHandle = await sessionManager.getOrCreateSession();
+        const sessionHandle = await sessionManager.getOrCreateSession('manual-udf-registration');
         vscode.window.showInformationMessage('Registering UDFs...');
         await udfManager.registerAllUdfs(gatewayClient, sessionHandle);
         const udfs = udfManager.getRegisteredUdfs();
@@ -754,6 +774,12 @@ function registerCommands(context: vscode.ExtensionContext) {
 
 async function startCluster(): Promise<void> {
   try {
+    const currentStatus = clusterManager.getStatus();
+    if (currentStatus === ClusterStatus.RUNNING || currentStatus === ClusterStatus.STARTING) {
+      updateStatusBar(currentStatus === ClusterStatus.RUNNING ? 'Running' : 'Starting...', currentStatus === ClusterStatus.STARTING);
+      return;
+    }
+
     updateStatusBar('Starting...', true);
 
     const config = vscode.workspace.getConfiguration('flink-notebooks');
@@ -793,7 +819,7 @@ async function stopCluster(): Promise<void> {
 
     // Try to close the session, but don't fail if it's already gone
     try {
-      await sessionManager.closeSession();
+      await sessionManager.closeAllSessions();
     } catch (sessionError) {
       // Session might already be closed due to cluster shutdown, ignore
       console.log('Session close failed (expected after cluster stop):', sessionError);
@@ -827,6 +853,18 @@ async function stopCluster(): Promise<void> {
       catalogTreeProvider.refresh();
     }
   }
+}
+
+async function maybeStartClusterForNotebook(): Promise<void> {
+  const autoStart = vscode.workspace
+    .getConfiguration('flink-notebooks')
+    .get('autoStartCluster', true);
+
+  if (!autoStart) {
+    return;
+  }
+
+  await startCluster();
 }
 
 async function restartCluster(): Promise<void> {

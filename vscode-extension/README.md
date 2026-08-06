@@ -86,6 +86,8 @@ Open Settings (`Cmd+,` / `Ctrl+,`) and search for "Flink Notebooks":
 
 ### Cluster Settings
 - `flink-notebooks.gatewayPort` - SQL Gateway port (default: 8083)
+- `flink-notebooks.webUiPort` - Flink Web UI and JobManager REST port (default: 8081)
+- `flink-notebooks.rpcPort` - JobManager RPC port (default: 6123)
 - `flink-notebooks.javaPath` - Path to Java executable (auto-detected if empty)
 - `flink-notebooks.jvmMemory` - JVM heap size (default: 1024m)
 - `flink-notebooks.parallelism` - Default parallelism (default: 2)
@@ -99,7 +101,7 @@ Open Settings (`Cmd+,` / `Ctrl+,`) and search for "Flink Notebooks":
 
 ### UDF Settings
 - `flink-notebooks.udfAutoRegister` - Auto-register UDFs on session creation (default: true)
-- `flink-notebooks.udfAutoBuild` - Auto-build UDFs when Java files saved (default: true)
+- `flink-notebooks.udfAutoBuild` - Auto-build UDFs when Java files saved (default: false)
 
 ### Job Monitoring
 - `flink-notebooks.jobRefreshInterval` - Job refresh interval in ms (default: 5000)
@@ -163,11 +165,12 @@ See `UDF_GUIDE.md` for comprehensive documentation.
 │  (Java Process)             │
 │  - SQL Gateway REST API     │
 │  - JobManager + TaskManager │
-│  - Web UI (port 8081)       │
+│  - Web UI (configurable)    │
 └─────────────────────────────┘
 ```
 
 The extension spawns a Java process running the Flink MiniCluster with SQL Gateway. All SQL queries are executed via REST API at `http://localhost:8083`.
+Notebook execution, catalog browsing, and manual UDF registration use separate SQL Gateway sessions so sidebar metadata refreshes do not change the active catalog/database for notebook cells.
 
 ## File Format
 

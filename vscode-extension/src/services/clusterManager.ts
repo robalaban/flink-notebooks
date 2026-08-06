@@ -21,6 +21,8 @@ export interface ClusterConfig {
   parallelism?: number;
   taskSlots?: number;
   gatewayPort?: number;
+  webUiPort?: number;
+  rpcPort?: number;
   jarPath?: string;
   connectorLibraryPath?: string;
 }
@@ -45,6 +47,8 @@ export class ClusterManager {
       parallelism: config.parallelism || 2,
       taskSlots: config.taskSlots || 2,
       gatewayPort: config.gatewayPort || 8083,
+      webUiPort: config.webUiPort || 8081,
+      rpcPort: config.rpcPort || 6123,
       jarPath: config.jarPath || this.findJarPath(),
       connectorLibraryPath: config.connectorLibraryPath || '',
     };
@@ -77,11 +81,6 @@ export class ClusterManager {
     );
 
     this.logger?.log(`Looking for JAR at: ${jarPath}`);
-
-    if (!fs.existsSync(jarPath)) {
-      this.logger?.error(`JAR not found at: ${jarPath}`);
-      throw new Error(`Flink MiniCluster JAR not found at: ${jarPath}`);
-    }
 
     return path.resolve(jarPath);
   }
@@ -144,6 +143,10 @@ export class ClusterManager {
 
   getGatewayUrl(): string {
     return `http://localhost:${this.config.gatewayPort}`;
+  }
+
+  getWebUIUrl(): string {
+    return `http://localhost:${this.config.webUiPort}`;
   }
 
   /**
@@ -220,6 +223,10 @@ export class ClusterManager {
       String(this.config.taskSlots),
       '--gateway-port',
       String(this.config.gatewayPort),
+      '--web-ui-port',
+      String(this.config.webUiPort),
+      '--rpc-port',
+      String(this.config.rpcPort),
     ];
 
     const env: NodeJS.ProcessEnv = {
@@ -415,7 +422,7 @@ export class ClusterManager {
     throw new Error(
       `SQL Gateway did not become ready within ${timeout / 1000} seconds. ` +
       `The Java process has been terminated. Check console logs for details. ` +
-      `Common causes: port conflicts (8081, 8083, 6123), insufficient memory, or missing Java dependencies.`
+      `Common causes: port conflicts (${this.config.webUiPort}, ${this.config.gatewayPort}, ${this.config.rpcPort}), insufficient memory, or missing Java dependencies.`
     );
   }
 }

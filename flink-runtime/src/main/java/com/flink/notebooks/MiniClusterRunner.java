@@ -38,6 +38,8 @@ public class MiniClusterRunner {
     private static final int DEFAULT_PARALLELISM = 2;
     private static final int DEFAULT_TASK_SLOTS = 2;
     private static final int DEFAULT_GATEWAY_PORT = 8083;
+    private static final int DEFAULT_WEB_UI_PORT = 8081;
+    private static final int DEFAULT_RPC_PORT = 6123;
 
     private MiniCluster miniCluster;
     private SqlGatewayRestEndpoint gateway;
@@ -54,6 +56,8 @@ public class MiniClusterRunner {
         LOG.info("  Parallelism: {}", config.parallelism);
         LOG.info("  Task Slots: {}", config.taskSlots);
         LOG.info("  Gateway Port: {}", config.gatewayPort);
+        LOG.info("  Web UI Port: {}", config.webUiPort);
+        LOG.info("  RPC Port: {}", config.rpcPort);
 
         try {
             runner.start(config);
@@ -87,7 +91,8 @@ public class MiniClusterRunner {
         Configuration flinkConfig = org.apache.flink.configuration.GlobalConfiguration.loadConfiguration();
 
         // Override REST port
-        flinkConfig.set(RestOptions.PORT, 8081);
+        flinkConfig.set(RestOptions.PORT, config.webUiPort);
+        flinkConfig.setString("jobmanager.rpc.port", String.valueOf(config.rpcPort));
 
         MiniClusterConfiguration miniClusterConfig = new MiniClusterConfiguration.Builder()
             .setConfiguration(flinkConfig)
@@ -105,13 +110,13 @@ public class MiniClusterRunner {
         LOG.info("Starting SQL Gateway on port {}...", config.gatewayPort);
 
         // Configure for connecting to the already-running MiniCluster
-        // Use 'remote' target pointing to MiniCluster's REST endpoint at localhost:8081
+        // Use 'remote' target pointing to MiniCluster's REST endpoint.
         Configuration sessionConfig = new Configuration();
         sessionConfig.set(org.apache.flink.configuration.DeploymentOptions.TARGET, "remote");
         sessionConfig.setString("jobmanager.rpc.address", "localhost");
-        sessionConfig.setInteger("jobmanager.rpc.port", 6123);
+        sessionConfig.setInteger("jobmanager.rpc.port", config.rpcPort);
         sessionConfig.setString("rest.address", "localhost");
-        sessionConfig.setInteger("rest.port", 8081);
+        sessionConfig.setInteger("rest.port", config.webUiPort);
 
         // Configuration for SQL Gateway's own REST endpoint (port 8083)
         Configuration gatewayConfig = new Configuration();
@@ -193,7 +198,7 @@ public class MiniClusterRunner {
         gateway.start();
 
         LOG.info("SQL Gateway started successfully on http://localhost:{}", config.gatewayPort);
-        LOG.info("Flink Web UI available at http://localhost:8081");
+        LOG.info("Flink Web UI available at http://localhost:{}", config.webUiPort);
     }
 
     public void stop() throws Exception {
@@ -388,6 +393,16 @@ public class MiniClusterRunner {
                         config.gatewayPort = Integer.parseInt(args[++i]);
                     }
                     break;
+                case "--web-ui-port":
+                    if (i + 1 < args.length) {
+                        config.webUiPort = Integer.parseInt(args[++i]);
+                    }
+                    break;
+                case "--rpc-port":
+                    if (i + 1 < args.length) {
+                        config.rpcPort = Integer.parseInt(args[++i]);
+                    }
+                    break;
                 case "--help":
                     printHelp();
                     System.exit(0);
@@ -407,6 +422,8 @@ public class MiniClusterRunner {
         System.out.println("  --parallelism <num>     Set parallelism level (default: 2)");
         System.out.println("  --taskslots <num>       Set task slots per TaskManager (default: 2)");
         System.out.println("  --gateway-port <port>   Set SQL Gateway port (default: 8083)");
+        System.out.println("  --web-ui-port <port>    Set Flink Web UI / REST port (default: 8081)");
+        System.out.println("  --rpc-port <port>       Set JobManager RPC port (default: 6123)");
         System.out.println("  --help                  Show this help message");
     }
 
@@ -414,5 +431,7 @@ public class MiniClusterRunner {
         int parallelism = DEFAULT_PARALLELISM;
         int taskSlots = DEFAULT_TASK_SLOTS;
         int gatewayPort = DEFAULT_GATEWAY_PORT;
+        int webUiPort = DEFAULT_WEB_UI_PORT;
+        int rpcPort = DEFAULT_RPC_PORT;
     }
 }

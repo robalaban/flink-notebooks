@@ -12,7 +12,7 @@ This module provides a standalone Java application that runs:
 
 ## Building
 
-Requires Java 11+:
+Requires Java 17+:
 
 ```bash
 ./gradlew build
@@ -33,13 +33,15 @@ java -jar build/libs/flink-minicluster.jar [options]
 - `--parallelism <num>` - Set parallelism level (default: 2)
 - `--taskslots <num>` - Set task slots per TaskManager (default: 2)
 - `--gateway-port <port>` - Set SQL Gateway port (default: 8083)
+- `--web-ui-port <port>` - Set Flink Web UI / REST port (default: 8081)
+- `--rpc-port <port>` - Set JobManager RPC port (default: 6123)
 - `--help` - Show help message
 
 ### Example
 
 ```bash
-# Start with 4 task slots and gateway on port 9000
-java -Xmx2g -jar build/libs/flink-minicluster.jar --taskslots 4 --gateway-port 9000
+# Start with 4 task slots and custom ports
+java -Xmx2g -jar build/libs/flink-minicluster.jar --taskslots 4 --gateway-port 9000 --web-ui-port 9001 --rpc-port 9123
 ```
 
 ## Endpoints

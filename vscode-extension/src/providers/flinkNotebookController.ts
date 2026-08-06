@@ -4,6 +4,8 @@
 
 import * as vscode from 'vscode';
 import { SqlGatewayClient } from '../services/sqlGatewayClient';
+import { getNextResultToken, getResultRows, shouldRetryInitialResult } from '../services/resultHelpers';
+import { SessionManager } from '../services/sessionManager';
 
 export interface StatementExecutedEvent {
   sql: string;
@@ -71,8 +73,10 @@ export class FlinkNotebookController {
         return;
       }
 
-      // Get or create session
-      const sessionId = await this.sessionManager.getOrCreateSession();
+      // Get or create a session scoped to this notebook.
+      const sessionId = await this.sessionManager.getOrCreateSession(
+        this.getNotebookSessionScope(cell.notebook)
+      );
 
       // Execute SQL
       const response = await this.gatewayClient.executeStatement(sessionId, sql);
@@ -174,7 +178,7 @@ export class FlinkNotebookController {
         console.log(`  nextResultUri: ${firstResult.nextResultUri}`);
         console.log(`  results.data length: ${firstResult.results?.data?.length || 0}`);
 
-        const rawData = firstResult.results?.data || firstResult.data || [];
+        const rawData = getResultRows(firstResult);
 
         // Per OpenAPI spec, resultType can be: NOT_READY, PAYLOAD, or EOS
 
@@ -194,7 +198,7 @@ export class FlinkNotebookController {
         if (firstResult.resultType === 'PAYLOAD' && rawData.length === 0) {
           if (firstResult.nextResultUri) {
             // Parse next token from URI
-            const nextUriToken = parseInt(firstResult.nextResultUri.split('/').pop() || '0');
+            const nextUriToken = getNextResultToken(firstResult.nextResultUri, token);
             if (nextUriToken > token) {
               console.log(`Token ${token} empty, advancing to token ${nextUriToken}`);
               token = nextUriToken;
@@ -210,18 +214,15 @@ export class FlinkNotebookController {
               continue;
             }
           } else {
-            // No nextResultUri and no data - wait for data to materialize
-            console.log(`Empty PAYLOAD at token ${token}, no nextResultUri, waiting for data...`);
-            await new Promise((resolve) => setTimeout(resolve, fetchRetryDelay));
-            fetchAttempts++;
-            firstResult = await this.gatewayClient.fetchResults(sessionId, statementId, token, 100);
-            continue;
+            // No nextResultUri and no data is a valid empty result set.
+            console.log(`Empty PAYLOAD at token ${token}, no nextResultUri - result complete`);
+            break;
           }
         }
 
         // Case 4: NOT_READY - results not materialized yet, wait and retry same token
-        if (firstResult.resultType === 'NOT_READY') {
-          console.log(`NOT_READY at token ${token}, waiting for materialization...`);
+        if (shouldRetryInitialResult(firstResult, token)) {
+          console.log(`${firstResult.resultType} at token ${token}, waiting for materialization...`);
           await new Promise((resolve) => setTimeout(resolve, fetchRetryDelay));
           fetchAttempts++;
           firstResult = await this.gatewayClient.fetchResults(sessionId, statementId, token, 100);
@@ -246,7 +247,7 @@ export class FlinkNotebookController {
       }
 
       // Transform first batch
-      const rawData = firstResult.results?.data || firstResult.data || [];
+      const rawData = getResultRows(firstResult);
       if (rawData.length > 0 && columns) {
         const transformedRows = this.transformRows(rawData, columns);
         rows.push(...transformedRows);
@@ -282,16 +283,13 @@ export class FlinkNotebookController {
           paused: false,
         });
 
-        // Set context for button visibility (initially not paused)
-        await vscode.commands.executeCommand('setContext', 'flink-notebooks:streamingPaused', false);
-
         // Display first batch immediately
         this.updateStreamingOutput(cell, execution, rows, columns);
 
         // Extract next token
-        let nextToken = firstResult.nextResultUri;
+        const nextToken = firstResult.nextResultUri;
         if (nextToken && nextToken.includes('/')) {
-          token = parseInt(nextToken.split('/').pop() || '0');
+          token = getNextResultToken(nextToken, token);
         } else {
           token = 1;
         }
@@ -310,13 +308,13 @@ export class FlinkNotebookController {
         // Batch query - fetch remaining results
         console.log('Detected batch query, fetching all results');
 
-        let nextToken = firstResult.nextResultUri;
-        let isComplete = firstResult.resultType === 'EOS' || !nextToken;
+        const nextToken = firstResult.nextResultUri;
+        const isComplete = firstResult.resultType === 'EOS' || !nextToken;
 
         if (!isComplete) {
           // More results to fetch
           if (nextToken && nextToken.includes('/')) {
-            token = parseInt(nextToken.split('/').pop() || '0');
+            token = getNextResultToken(nextToken, token);
           } else {
             token = 1;
           }
@@ -337,6 +335,7 @@ export class FlinkNotebookController {
         }
       }
     } catch (error) {
+      console.error('Error fetching results:', error);
       throw error;
     }
   }
@@ -376,7 +375,7 @@ export class FlinkNotebookController {
       console.log(`Fetching batch results: token=${token}`);
       const result = await this.gatewayClient.fetchResults(sessionId, statementId, token, 100);
 
-      const rawData = result.results?.data || result.data || [];
+      const rawData = getResultRows(result);
       if (rawData.length > 0 && columns) {
         const transformedRows = this.transformRows(rawData, columns);
         rows.push(...transformedRows);
@@ -393,7 +392,7 @@ export class FlinkNotebookController {
 
       if (!isComplete) {
         if (nextToken && nextToken.includes('/')) {
-          token = parseInt(nextToken.split('/').pop() || '0');
+          token = getNextResultToken(nextToken, token);
         } else {
           token += 1;
         }
@@ -461,7 +460,7 @@ export class FlinkNotebookController {
 
       try {
         const result = await this.gatewayClient.fetchResults(sessionId, statementId, token, 100);
-        const rawData = result.results?.data || result.data || [];
+        const rawData = getResultRows(result);
 
         // Transform and append new rows
         if (rawData.length > 0 && columns) {
@@ -484,7 +483,7 @@ export class FlinkNotebookController {
         if (!isComplete) {
           // Extract next token
           if (nextToken && nextToken.includes('/')) {
-            token = parseInt(nextToken.split('/').pop() || '0');
+            token = getNextResultToken(nextToken, token);
           } else {
             token += 1;
           }
@@ -731,7 +730,9 @@ export class FlinkNotebookController {
     // Also try canceling via metadata (fallback)
     const statementId = cell.metadata?.statement_id as string | undefined;
     if (statementId) {
-      const sessionId = await this.sessionManager.getCurrentSessionId();
+      const sessionId = await this.sessionManager.getCurrentSessionId(
+        this.getNotebookSessionScope(cell.notebook)
+      );
       if (sessionId) {
         try {
           await this.gatewayClient.cancelOperation(sessionId, statementId);
@@ -768,11 +769,7 @@ export class FlinkNotebookController {
         streaming_paused: true,
       });
 
-      // Set context for button visibility
-      await vscode.commands.executeCommand('setContext', 'flink-notebooks:streamingPaused', true);
-
       // Refresh UI to show paused state
-      const rows = cell.metadata?.total_rows_fetched || 0;
       const rawRows = cell.outputs?.[0]?.items?.[1]?.data;
       if (rawRows) {
         try {
@@ -799,9 +796,6 @@ export class FlinkNotebookController {
       await this.updateCellMetadata(cell, {
         streaming_paused: false,
       });
-
-      // Set context for button visibility
-      await vscode.commands.executeCommand('setContext', 'flink-notebooks:streamingPaused', false);
 
       // Refresh UI to show streaming state
       const rawRows = cell.outputs?.[0]?.items?.[1]?.data;
@@ -841,9 +835,6 @@ export class FlinkNotebookController {
         throw error;
       }
 
-      // Clear context for button visibility
-      await vscode.commands.executeCommand('setContext', 'flink-notebooks:streamingPaused', false);
-
       // Clean up
       this.streamingCells.delete(cellKey);
     }
@@ -873,6 +864,10 @@ export class FlinkNotebookController {
    */
   private getCellKey(cell: vscode.NotebookCell): string {
     return `${cell.notebook.uri.toString()}-${cell.index}`;
+  }
+
+  private getNotebookSessionScope(notebook: vscode.NotebookDocument): string {
+    return notebook.uri.toString();
   }
 
   /**
@@ -923,93 +918,5 @@ export class FlinkNotebookController {
 
     this._onStatementExecuted.dispose();
     this.controller.dispose();
-  }
-}
-
-/**
- * Manages SQL sessions for notebooks
- */
-export class SessionManager {
-  private currentSessionId: string | null = null;
-  private onSessionCreatedCallback?: (sessionId: string) => Promise<void>;
-
-  constructor(private gatewayClient: SqlGatewayClient) {}
-
-  /**
-   * Set a callback to be invoked when a new session is created
-   */
-  setOnSessionCreated(callback: (sessionId: string) => Promise<void>): void {
-    this.onSessionCreatedCallback = callback;
-  }
-
-  async getOrCreateSession(): Promise<string> {
-    if (this.currentSessionId) {
-      try {
-        // Verify session still exists
-        await this.gatewayClient.getSession(this.currentSessionId);
-        return this.currentSessionId;
-      } catch {
-        // Session no longer valid, create new one
-        this.currentSessionId = null;
-      }
-    }
-
-    // Get execution mode from configuration
-    const config = vscode.workspace.getConfiguration('flink-notebooks');
-    const executionMode = config.get<string>('executionMode', 'auto');
-
-    // Create session with optional execution mode
-    const properties: Record<string, string> = {};
-    if (executionMode !== 'auto') {
-      properties['execution.runtime-mode'] = executionMode;
-      console.log(`Creating Flink session with execution mode: ${executionMode}`);
-    } else {
-      console.log('Creating Flink session with auto execution mode (Flink decides)');
-    }
-
-    const session = await this.gatewayClient.createSession('notebook-session', properties);
-    this.currentSessionId = session.sessionHandle;
-
-    // Call session created callback if registered
-    if (this.onSessionCreatedCallback) {
-      try {
-        await this.onSessionCreatedCallback(this.currentSessionId);
-      } catch (error) {
-        console.error('Error in session created callback:', error);
-        // Don't fail session creation if callback fails
-      }
-    }
-
-    return this.currentSessionId;
-  }
-
-  getCurrentSessionId(): string | null {
-    return this.currentSessionId;
-  }
-
-  async closeSession(): Promise<void> {
-    if (this.currentSessionId) {
-      await this.gatewayClient.closeSession(this.currentSessionId);
-      this.currentSessionId = null;
-    }
-  }
-
-  /**
-   * Close the current session and open a new one. Used after rebuilding UDFs:
-   * a fresh session means a fresh classloader, which loads the new UDF classes.
-   * Tolerates "session already gone" during close so a dead session doesn't
-   * block recycling.
-   */
-  async recycleSession(): Promise<string> {
-    if (this.currentSessionId) {
-      try {
-        await this.gatewayClient.closeSession(this.currentSessionId);
-      } catch (error) {
-        // Session may already be gone (cluster restarted, etc.) - proceed.
-        console.log("recycleSession: close failed, proceeding:", error);
-      }
-      this.currentSessionId = null;
-    }
-    return this.getOrCreateSession();
   }
 }

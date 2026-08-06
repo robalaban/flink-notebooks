@@ -22,7 +22,7 @@ A VSCode extension providing a Jupyter-like experience for authoring and running
 ## Requirements
 
 - **Node.js** 18+ (for VSCode extension)
-- **Java** 11+ (to run Flink MiniCluster)
+- **Java** 17+ (to run Flink 1.20 MiniCluster)
 - **AWS CLI** (optional, for Glue Catalog Integration)
 
 
@@ -79,6 +79,8 @@ Very much WIP!!
 | Setting | Default | Description |
 |---------|---------|-------------|
 | `flink-notebooks.gatewayPort` | `8083` | SQL Gateway REST API port |
+| `flink-notebooks.webUiPort` | `8081` | Flink Web UI / JobManager REST API port |
+| `flink-notebooks.rpcPort` | `6123` | JobManager RPC port |
 | `flink-notebooks.miniclusterJarPath` | (empty) | Path to MiniCluster JAR (auto-detected if empty) |
 | `flink-notebooks.javaPath` | (empty) | Path to Java executable |
 | `flink-notebooks.jvmMemory` | `1024m` | JVM heap size for MiniCluster |
@@ -94,7 +96,7 @@ See [SETUP.md#troubleshooting](SETUP.md#troubleshooting) for common issues and s
 
 **Quick fixes:**
 
-- **Cluster won't start**: Verify Java 11+ is installed and JAR is built (`./gradlew shadowJar`)
+- **Cluster won't start**: Verify Java 17+ is installed, the JAR is built (`./gradlew shadowJar`), and ports 8081/8083/6123 are free or configured differently
 - **JAR not found**: Rebuild with `cd flink-runtime && ./gradlew shadowJar`
 - **No Glue catalog**: Configure AWS credentials with `aws configure`
 
